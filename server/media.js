@@ -15,7 +15,7 @@ export async function callSpace(space, endpoint, data, { startMs = 20000, waitMs
     } catch (e) { errs.push(`${who}: ${String(e.message).slice(0, 100)}`); }
   }
   console.error('space call failed', endpoint, errs.join(' | '));
-  throw new Error(`The free generator is busy or out of quota right now (${errs.join(' | ')}). Try again in a few minutes.`);
+  throw new Error(`The free GPU for AI video and pictures is used up for today (Hugging Face gives free accounts about 5 minutes of GPU a day, shared by every video and picture). It refills about 24 hours after the first use. Details: ${errs.join(' | ')}`);
 }
 const SPACE = 'https://black-forest-labs-flux-1-schnell.hf.space';
 const snap = (n, d) => Math.min(1344, Math.max(256, Math.round((Number(n) || d) / 64) * 64));
