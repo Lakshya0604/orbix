@@ -13,7 +13,7 @@ const { Schema, model } = mongoose; const run = promisify(execFile);
 export const VideoJob = model('VideoJob', new Schema({
   userId: { type: Schema.Types.ObjectId, index: true }, topic: String, title: { type: String, default: '' },
   status: { type: String, default: 'queued', index: true }, // queued, scripting, clips, stitching, done, failed
-  scenes: [{ prompt: String, say: { type: String, default: '' }, state: { type: String, default: 'wait' } }], error: String, note: String, mode: { type: String, default: 'ai' },
+  scenes: [{ prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' } }], error: String, note: String, mode: { type: String, default: 'ai' },
   lockUntil: { type: Date, default: null }, bytes: { type: Number, default: 0 },
 }, { timestamps: true }));
 export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer }, { timestamps: true }));
@@ -29,9 +29,9 @@ export async function startJob(userId, topic) {
 }
 
 async function script(job) {
-  const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: `You write ultra short vertical YouTube Shorts scripts with a voiceover. Reply with ONLY JSON: {"title":"...","scenes":[{"shot":"...","say":"..."}]}. Exactly ${SCENES} scenes that tell one story with a hook first and a punchy end. "shot" is ONE visual description in English, 20 to 40 words, concrete (subject, setting, light, camera move), no text overlays, no real people or brands. "say" is the narration for that shot: ONE sentence of 8 to 12 words, spoken in the same language as the user's topic (English if unsure; Hindi in Devanagari script if the topic is Hindi or Hinglish).` }, { role: 'user', content: `Topic: ${job.topic}` }] });
+  const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: `You write ultra short vertical YouTube Shorts scripts with a voiceover. Reply with ONLY JSON: {"title":"...","scenes":[{"shot":"...","kw":"...","say":"..."}]}. Exactly ${SCENES} scenes that tell one story with a hook first and a punchy end. "shot" is ONE visual description in English, 20 to 40 words, concrete (subject, setting, light, camera move), no text overlays, no real people or brands. "kw" is 2 or 3 plain English words to search a stock video site for this shot (for example "lighthouse storm sea"). "say" is the narration for that shot: ONE sentence of 8 to 12 words, spoken in the same language as the user's topic (English if unsure; Hindi in Devanagari script if the topic is Hindi or Hinglish).` }, { role: 'user', content: `Topic: ${job.topic}` }] });
   const j = JSON.parse(String(m.content || '').match(/\{[\s\S]*\}/)?.[0] || '{}');
-  const scenes = (Array.isArray(j.scenes) ? j.scenes : []).map(x => typeof x === 'string' ? { shot: x, say: '' } : { shot: String(x?.shot || ''), say: String(x?.say || '') }).filter(x => x.shot).slice(0, SCENES).map(x => ({ prompt: x.shot.slice(0, 400), say: x.say.slice(0, 200) }));
+  const scenes = (Array.isArray(j.scenes) ? j.scenes : []).map(x => typeof x === 'string' ? { shot: x, kw: '', say: '' } : { shot: String(x?.shot || ''), kw: String(x?.kw || ''), say: String(x?.say || '') }).filter(x => x.shot).slice(0, SCENES).map(x => ({ prompt: x.shot.slice(0, 400), kw: x.kw.replace(/[^\w ]/g, ' ').slice(0, 60).trim(), say: x.say.slice(0, 200) }));
   if (scenes.length < 2) throw new Error('The script came back empty. Try another topic.');
   job.title = String(j.title || job.topic).slice(0, 80); job.scenes = scenes; job.status = 'clips'; await job.save();
 }
@@ -78,6 +78,27 @@ async function stillClip(prompt, i) {
     return await fs.readFile(out);
   } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
+
+// Stock fallback (free Pixabay API key): real stock footage for the scene keywords, cropped to 9:16 and trimmed to 4.5 s.
+async function stockClip(job, i) {
+  const key = process.env.PIXABAY_KEY; if (!key) throw new Error('No stock key set.');
+  const sc = job.scenes[i]; const base = String(sc.kw || sc.prompt).split(/\s+/).slice(0, 4).join(' ');
+  let hit = null;
+  for (const q of [base, base.split(' ').slice(0, 2).join(' '), String(job.topic).split(/\s+/).slice(0, 3).join(' '), 'nature']) {
+    const r = await fetch(`https://pixabay.com/api/videos/?key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}&per_page=20&safesearch=true`, { signal: AbortSignal.timeout(20000) });
+    if (!r.ok) throw new Error(`Stock service said HTTP ${r.status}.`);
+    const hits = ((await r.json()).hits || []).filter(h => (h.duration || 0) >= 3 && h.videos?.medium?.url);
+    if (hits.length) { hit = hits[(i * 3 + Date.now()) % Math.min(hits.length, 8)]; break; }
+  }
+  if (!hit) throw new Error('No stock footage found for this topic.');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-s-'));
+  try {
+    const r = await fetch(hit.videos.medium.url, { signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Could not download stock footage.');
+    const src = path.join(dir, 's.mp4'), out = path.join(dir, 'o.mp4'); await fs.writeFile(src, Buffer.from(await r.arrayBuffer()));
+    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', src, '-t', '4.5', '-an', '-vf', `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=24,format=yuv420p`, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26', '-movflags', '+faststart', out], { timeout: 90000 });
+    return await fs.readFile(out);
+  } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}
 async function step(job) {
   if (job.status === 'queued' || job.status === 'scripting') { job.status = 'scripting'; await job.save(); return script(job); }
   if (job.status === 'clips') {
@@ -93,9 +114,10 @@ async function step(job) {
           if (!/used up|quota|GPU/i.test(e.message)) throw e;
           const done = job.scenes.filter(s => s.state === 'ok').length;
           if (done) { await VideoBlob.deleteMany({ jobId: job._id, kind: { $in: ['clip', 'audio'] } }); job.scenes.forEach(s => { s.state = 'wait'; }); }
-          job.mode = 'still'; job.note = 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion'; await job.save();
+          job.mode = process.env.PIXABAY_KEY ? 'stock' : 'still'; job.note = process.env.PIXABAY_KEY ? 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)' : 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion'; await job.save();
         }
       }
+      if (job.mode === 'stock') data = await stockClip(job, i);
       if (job.mode === 'still') data = await stillClip(job.scenes[i].prompt, i);
       await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'clip', idx: i, data });
       job.scenes[i].state = 'ok'; await job.save();
