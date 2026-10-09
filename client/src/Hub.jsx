@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api, stream } from './api.js';
 import Tilt from './Tilt.jsx';
-import Orbit3D from './Orbit3D.jsx';
+const Orbit3D = lazy(() => import('./Orbit3D.jsx'));
 import { orbi, orbiContext } from './Mascot.jsx';
 import { Answer, Steps, saveText, copyText, chatToText } from './parts.jsx';
 
@@ -184,7 +184,7 @@ export default function Hub({ user, dark, setDark, logout }) {
           <div className="thread">
             {!msgs.length && !live && (
               <motion.div className="hero" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
-                <div className="hero3d"><Orbit3D dark={dark} count={6} /></div>
+                <div className="hero3d"><Suspense fallback={null}><Orbit3D dark={dark} count={6} /></Suspense></div>
                 <h1>What should we get done, {user.name.split(' ')[0]}?</h1>
                 <p>Orbix picks the right tools from your {connectedCount} connected server{connectedCount === 1 ? '' : 's'} and shows every step. Anything it makes, you can download.</p>
                 <div className="sugg">{SUGGEST.map(s => <Tilt as="button" key={s} max={6} onClick={() => send(s)}>{s}</Tilt>)}</div>
