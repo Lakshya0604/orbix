@@ -62,16 +62,16 @@ export async function chatCompletion({ messages, tools }) {
 }
 
 // Photo and video understanding through Groq's free vision models (images only, small request).
-const VISION = [process.env.GROQ_VISION_MODEL, 'meta-llama/llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct'].filter(Boolean);
+const VISION = [process.env.GROQ_VISION_MODEL, 'qwen/qwen3.8-27b', 'meta-llama/llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct'].filter(Boolean);
 export async function visionDescribe(images, ask, { frames = false } = {}) {
   const key = process.env.GROQ_API_KEY; if (!key) throw new Error('The AI model is not configured on this server.');
   const imgs = (images || []).filter(u => /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(u)).slice(0, 4); if (!imgs.length) throw new Error('No readable picture was sent.');
   const instr = `${frames ? 'These are frames from one short video, in order. ' : ''}Describe what you see in detail (subjects, setting, colors, style, any motion or story). Copy any visible text exactly. Then answer the user's question if there is one.${ask ? ` User question: ${String(ask).slice(0, 300)}` : ''}`;
   const errs = [];
   for (const model of VISION) {
-    const r = await fetch(URL_, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` }, body: JSON.stringify({ model, temperature: 0.2, max_tokens: 700, messages: [{ role: 'user', content: [{ type: 'text', text: instr }, ...imgs.map(u => ({ type: 'image_url', image_url: { url: u } }))] }] }), signal: AbortSignal.timeout(60000) }).catch(e => ({ ok: false, status: 0, json: async () => ({ error: { message: e.message } }) }));
+    const r = await fetch(URL_, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` }, body: JSON.stringify({ model, temperature: 0.2, max_tokens: 1400, messages: [{ role: 'user', content: [{ type: 'text', text: instr }, ...imgs.map(u => ({ type: 'image_url', image_url: { url: u } }))] }] }), signal: AbortSignal.timeout(60000) }).catch(e => ({ ok: false, status: 0, json: async () => ({ error: { message: e.message } }) }));
     const j = await r.json().catch(() => ({}));
-    if (r.ok && j.choices?.[0]?.message?.content) return String(j.choices[0].message.content).slice(0, 2500);
+    if (r.ok && j.choices?.[0]?.message?.content) return String(j.choices[0].message.content).replace(/<think>[\s\S]*?<\/think>/g, '').trim().slice(0, 2500);
     errs.push(`${model.split('/').pop()}: ${String(j?.error?.message || r.status).slice(0, 90)}`);
   }
   throw new Error(`Picture understanding is not available right now (${errs.join(' | ')}).`);
