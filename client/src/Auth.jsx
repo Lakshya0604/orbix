@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './api.js';
-import Orbit3D from './Orbit3D.jsx';
+const Orbit3D = lazy(() => import('./Orbit3D.jsx'));
 import { orbi } from './Mascot.jsx';
 
 const copy = {
@@ -31,7 +31,7 @@ export default function Auth({ mode, q, dark, setDark, onDone }) {
     <div className="auth">
       <aside className="auth-art">
         <div className="brand"><span className="logo-dot" />Orbix</div>
-        <Orbit3D dark={dark} />
+        <Suspense fallback={null}><Orbit3D dark={dark} /></Suspense>
         <div className="art-copy">
           <h2>Every MCP server.<br /><em>One conversation.</em></h2>
           <p>Connect docs, search, code and video servers. Watch each one live. Ask for anything and download what comes back.</p>
