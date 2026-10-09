@@ -7,31 +7,32 @@ import os from 'node:os';
 import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 import { chatCompletion } from './llm.js';
-import { generateClip, generateSpeech, generateAgnesClip } from './media.js';
+import { generateClip, generateSpeech, generateAgnesClip, generateImage, generateWithReference } from './media.js';
 const { Schema, model } = mongoose; const run = promisify(execFile);
 
 export const VideoJob = model('VideoJob', new Schema({
   userId: { type: Schema.Types.ObjectId, index: true }, topic: String, title: { type: String, default: '' },
   status: { type: String, default: 'queued', index: true }, // queued, scripting, clips, stitching, done, failed
-  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, stage: { type: String, default: '' }, startedAt: Date,
+  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, charDesc: { type: String, default: '' }, stage: { type: String, default: '' }, startedAt: Date,
   lockUntil: { type: Date, default: null }, bytes: { type: Number, default: 0 },
 }, { timestamps: true }));
 export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer }, { timestamps: true }));
 
 export const MAX_ACTIVE = 1, MAX_PER_DAY = 4, SCENES = 4, LONG_SCENES = 14;
-export async function startJob(userId, topic, long = false) {
+export async function startJob(userId, topic, long = false, char = false) {
   const t = String(topic || '').trim().slice(0, 200);
   if (t.length < 3) throw Object.assign(new Error('Tell me what the video is about.'), { status: 400 });
   await VideoJob.updateMany({ userId, status: { $nin: ['done', 'failed'] }, updatedAt: { $lt: new Date(Date.now() - 20 * 60000) } }, { status: 'failed', error: 'This one got stuck (the server restarted). Please start it again.' });
   if (await VideoJob.countDocuments({ userId, status: { $nin: ['done', 'failed'] } }) >= MAX_ACTIVE) throw Object.assign(new Error('One video is already being made. Wait for it to finish.'), { status: 429 });
   if (await VideoJob.countDocuments({ userId, createdAt: { $gt: new Date(Date.now() - 86400000) } }) >= MAX_PER_DAY) throw Object.assign(new Error(`Free limit: ${MAX_PER_DAY} videos per day.`), { status: 429 });
-  return VideoJob.create({ userId, topic: t, long: !!long, startedAt: new Date() });
+  return VideoJob.create({ userId, topic: t, long: !!long, char: !!char, startedAt: new Date() });
 }
 
 const ARC = 'The scenes must be ONE connected story with a clear arc: a hook/intro that sets the character and place, a buildup that raises the stakes, a turn or twist, a climax, and a closing ending that pays off the start. Each scene continues directly from the previous one (same characters, same place, cause and effect), never a list of unrelated facts.';
 const jsonOf = t => { const m = String(t || '').match(/\{[\s\S]*\}/)?.[0] || ''; for (const v of [m, m.replace(/,\s*([}\]])/g, '$1'), m.replace(/[\u201c\u201d]/g, "'").replace(/,\s*([}\]])/g, '$1')]) { try { return JSON.parse(v); } catch {} } return null; };
 async function script(job) {
   const N = job.long ? LONG_SCENES : SCENES; let outline = '';
+  if (job.char && !job.charDesc) { try { const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: 'Describe the MAIN character of this story in ONE English sentence of 25 to 35 words for an illustrator: age, build, face, hair, clothes with colors, any signature prop. Reply with only that sentence.' }, { role: 'user', content: `Topic: ${job.topic}` }] }); job.charDesc = String(m.content || '').replace(/\s+/g, ' ').slice(0, 400); } catch { job.charDesc = ''; } }
   if (job.long) {
     let o = null;
     for (let k = 0; k < 3 && !o; k++) { const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: `You plan a short story for a narrated video. Reply with ONLY valid JSON (no double quote characters inside text): {"title":"...","acts":[{"act":"intro","beat":"..."},{"act":"buildup","beat":"..."},{"act":"twist","beat":"..."},{"act":"climax","beat":"..."},{"act":"ending","beat":"..."}]}. Each beat is 1 or 2 sentences. The title is in the same language as the narration. Same language as the user's topic (Hindi in Devanagari if the topic is Hindi or Hinglish). One coherent story with named or clearly described characters.` }, { role: 'user', content: `Topic: ${job.topic}` }] }); const j = jsonOf(m.content); if (j && Array.isArray(j.acts) && j.acts.length >= 4) o = j; }
@@ -91,11 +92,11 @@ async function stitch(job) {
 }
 
 // Fallback when the free GPU quota is out: a free keyless AI picture (Pollinations) + slow Ken Burns pan/zoom -> 4 s clip.
-async function stillClip(prompt, i) {
+async function stillClip(prompt, i, given) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-k-'));
   try {
     const q = encodeURIComponent(`${String(prompt).slice(0, 350)}, vertical cinematic photo, vivid light`);
-    let buf = null, err = '';
+    let buf = given || null, err = '';
     for (let a = 0; a < 3 && !buf; a++) {
       try { const r = await fetch(`https://image.pollinations.ai/prompt/${q}?width=576&height=1024&nologo=true&seed=${Date.now() % 100000 + i}`, { signal: AbortSignal.timeout(60000) }); const b = Buffer.from(await r.arrayBuffer()); if (r.ok && /image/.test(r.headers.get('content-type') || '') && b.length > 5000) buf = b; else err = `HTTP ${r.status}`; } catch (e) { err = e.message; }
       if (!buf) await new Promise(r => setTimeout(r, 4000));
@@ -109,6 +110,7 @@ async function stillClip(prompt, i) {
 }
 
 // Stock fallback (free Pixabay API key): real stock footage for the scene keywords, cropped to 9:16 and trimmed to 4.5 s.
+const ANIM = /animat|cartoon|anime|एनिमेट|कार्टून/i;
 const staticClip = async f => { try { const { stderr } = await run(ffmpegPath, ['-i', f, '-vf', 'scale=96:-2,freezedetect=n=0.004:d=1.5', '-an', '-f', 'null', '-'], { timeout: 30000 }); return /freeze_start/.test(String(stderr || '')); } catch { return false; } };
 async function stockClip(job, i) {
   const key = process.env.PIXABAY_KEY; if (!key) throw new Error('No stock key set.');
@@ -116,7 +118,7 @@ async function stockClip(job, i) {
   const parts = String(sc.kw || sc.prompt).split('|').map(x => x.trim()).filter(Boolean);
   const K = job.long ? 2 : 1; const queries = []; for (let k = 0; k < K; k++) queries.push(parts[k] || parts[0] || String(sc.prompt));
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-s-')); const used = new Set(); const files = [];
-  const search = async q => { const r = await fetch(`https://pixabay.com/api/videos/?key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}&per_page=20&safesearch=true`, { signal: AbortSignal.timeout(20000) }); if (!r.ok) throw new Error(`Stock service said HTTP ${r.status}.`); return ((await r.json()).hits || []).filter(h => (h.duration || 0) >= 4 && h.videos?.medium?.url); };
+  const search = async q => { const r = await fetch(`https://pixabay.com/api/videos/?key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}&per_page=20&safesearch=true${ANIM.test(job.topic) ? '&video_type=animation' : ''}`, { signal: AbortSignal.timeout(20000) }); if (!r.ok) throw new Error(`Stock service said HTTP ${r.status}.`); return ((await r.json()).hits || []).filter(h => (h.duration || 0) >= 4 && h.videos?.medium?.url); };
   const encode = async (src, out, flip) => run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', src, '-t', '4.5', '-an', '-threads', '1', '-vf', `${flip ? 'hflip,scale=' + Math.round(W * 1.3) + ':' + Math.round(H * 1.3) + ',crop=' + W + ':' + H + ',' : ''}scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=24,format=yuv420p`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-movflags', '+faststart', out], { timeout: 90000 });
   try {
     for (let k = 0; k < K; k++) {
@@ -142,6 +144,18 @@ async function stockClip(job, i) {
     return await fs.readFile(outF);
   } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
+async function charClip(job, i) {
+  let ref = await VideoBlob.findOne({ jobId: job._id, kind: 'charref' });
+  const get = async url => { const r = await fetch(url, { signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Could not download the character picture.'); return Buffer.from(await r.arrayBuffer()); };
+  if (!ref) {
+    await stage(job, 'Drawing the main character');
+    const url = await generateImage({ prompt: `${job.charDesc || job.topic}, full body, standing, plain simple background, 2D cel-shaded animation style, flat colors, clean outlines`, width: 768, height: 1024 });
+    ref = await VideoBlob.create({ jobId: job._id, kind: 'charref', idx: 0, data: await get(url) });
+  }
+  await stage(job, `Clip ${i + 1} of ${job.scenes.length}: drawing scene`);
+  const url = await generateWithReference({ image: ref.data, prompt: `The same character with the same face, hair and clothes. ${String(job.scenes[i].prompt).slice(0, 380)}. 2D cel-shaded animated illustration, dark moody lighting, vertical frame.` });
+  return stillClip(job.scenes[i].prompt, i, await get(url));
+}
 const NOTE = { agnes: 'Free AI-video GPU was used up today, so this one uses Agnes AI video', stock: 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)', still: 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion' };
 let agnesOffUntil = 0;
 const fallbackMode = () => process.env.AGNES_API_KEY && Date.now() > agnesOffUntil ? 'agnes' : process.env.PIXABAY_KEY ? 'stock' : 'still';
@@ -152,8 +166,9 @@ const stage = async (job, t) => { job.stage = t; await job.save().catch(() => {}
 async function makeScene(job, i) {
   const tag = `Clip ${i + 1} of ${job.scenes.length}`;
   let data;
-  if (job.mode === 'ai' && Date.now() - gpuDownAt < 1800000 && fallbackMode() !== 'still') { job.mode = fallbackMode(); job.note = NOTE[job.mode]; await job.save(); }
-  if (job.mode === 'ai' || !job.mode) {
+  const useChar = !!job.char; if (useChar) { data = await charClip(job, i); job.note = 'AI pictures with one fixed character (FLUX Kontext), slow pan and zoom'; }
+  if (!useChar && job.mode === 'ai' && Date.now() - gpuDownAt < 1800000 && fallbackMode() !== 'still') { job.mode = fallbackMode(); job.note = NOTE[job.mode]; await job.save(); }
+  if (!useChar && (job.mode === 'ai' || !job.mode)) {
     try {
       await stage(job, `${tag}: AI video`);
       const url = await generateClip({ prompt: job.scenes[i].prompt, seconds: 4, width: W, height: H, waitMs: 80000 });
@@ -167,7 +182,7 @@ async function makeScene(job, i) {
       job.mode = fallbackMode(); job.note = NOTE[job.mode]; await job.save();
     }
   }
-  if (job.mode === 'agnes') {
+  if (!useChar && job.mode === 'agnes') {
     try {
       const wait = agnesAt + 62000 - Date.now(); if (wait > 0) await new Promise(x => setTimeout(x, wait));
       agnesAt = Date.now(); const t0 = Date.now(); const out = await generateAgnesClip({ prompt: job.scenes[i].prompt });
@@ -179,8 +194,8 @@ async function makeScene(job, i) {
       data = await stockClip(job, i); job.note = `${NOTE.agnes} + Pixabay stock for some scenes (${e.message.slice(0, 60)})`;
     }
   }
-  if (job.mode === 'stock') { await stage(job, `${tag}: finding footage`); data = await stockClip(job, i); job.note = NOTE.stock; }
-  if (job.mode === 'still') data = await stillClip(job.scenes[i].prompt, i);
+  if (!useChar && job.mode === 'stock') { await stage(job, `${tag}: finding footage`); data = await stockClip(job, i); job.note = NOTE.stock; }
+  if (!useChar && job.mode === 'still') data = await stillClip(job.scenes[i].prompt, i);
   await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'clip', idx: i, data });
   if (job.scenes[i].say) {
     await stage(job, `${tag}: voiceover`);
