@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 import { chatCompletion } from './llm.js';
-import { generateClip, generateSpeech } from './media.js';
+import { generateClip, generateSpeech, generateAgnesClip } from './media.js';
 const { Schema, model } = mongoose; const run = promisify(execFile);
 
 export const VideoJob = model('VideoJob', new Schema({
@@ -29,8 +29,12 @@ export async function startJob(userId, topic) {
 }
 
 async function script(job) {
-  const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: `You write ultra short vertical YouTube Shorts scripts with a voiceover. Reply with ONLY JSON: {"title":"...","scenes":[{"shot":"...","kw":"...","say":"..."}]}. Exactly ${SCENES} scenes that tell one story with a hook first and a punchy end. "shot" is ONE visual description in English, 20 to 40 words, concrete (subject, setting, light, camera move), no text overlays, no real people or brands. "kw" is 2 or 3 plain English words to search a stock video site for this shot (for example "lighthouse storm sea"). "say" is the narration for that shot: ONE sentence of 8 to 12 words, spoken in the same language as the user's topic (English if unsure; Hindi in Devanagari script if the topic is Hindi or Hinglish).` }, { role: 'user', content: `Topic: ${job.topic}` }] });
-  const j = JSON.parse(String(m.content || '').match(/\{[\s\S]*\}/)?.[0] || '{}');
+  let j = null, lastErr = '';
+  for (let tryN = 0; tryN < 3 && !j; tryN++) {
+  const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: `You write ultra short vertical YouTube Shorts scripts with a voiceover. Reply with ONLY valid JSON (never use double quote characters inside the text values): {"title":"...","scenes":[{"shot":"...","kw":"...","say":"..."}]}. Exactly ${SCENES} scenes that tell one story with a hook first and a punchy end. "shot" is ONE visual description in English, 20 to 40 words, concrete (subject, setting, light, camera move), no text overlays, no real people or brands. "kw" is 2 or 3 plain English words to search a stock video site for this shot (for example "lighthouse storm sea"). "say" is the narration for that shot: ONE sentence of 8 to 12 words, spoken in the same language as the user's topic (English if unsure; Hindi in Devanagari script if the topic is Hindi or Hinglish).` }, { role: 'user', content: `Topic: ${job.topic}` }] });
+  try { j = JSON.parse(String(m.content || '').match(/\{[\s\S]*\}/)?.[0] || '{}'); if (!Array.isArray(j.scenes)) j = null; } catch (e) { lastErr = e.message; j = null; }
+  }
+  if (!j) throw new Error('The script came back broken. Try again.');
   const scenes = (Array.isArray(j.scenes) ? j.scenes : []).map(x => typeof x === 'string' ? { shot: x, kw: '', say: '' } : { shot: String(x?.shot || ''), kw: String(x?.kw || ''), say: String(x?.say || '') }).filter(x => x.shot).slice(0, SCENES).map(x => ({ prompt: x.shot.slice(0, 400), kw: x.kw.replace(/[^\w ]/g, ' ').slice(0, 60).trim(), say: x.say.slice(0, 200) }));
   if (scenes.length < 2) throw new Error('The script came back empty. Try another topic.');
   job.title = String(j.title || job.topic).slice(0, 80); job.scenes = scenes; job.status = 'clips'; await job.save();
@@ -99,6 +103,9 @@ async function stockClip(job, i) {
     return await fs.readFile(out);
   } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
+const NOTE = { agnes: 'Free AI-video GPU was used up today, so this one uses Agnes AI video', stock: 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)', still: 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion' };
+const fallbackMode = () => process.env.AGNES_API_KEY ? 'agnes' : process.env.PIXABAY_KEY ? 'stock' : 'still';
+let agnesAt = 0;
 let gpuDownAt = 0; // last time the free GPU quota failed; skip the slow AI attempt for 30 min after
 async function step(job) {
   if (job.status === 'queued' || job.status === 'scripting') { job.status = 'scripting'; await job.save(); return script(job); }
@@ -106,7 +113,7 @@ async function step(job) {
     const i = job.scenes.findIndex(s => s.state !== 'ok'); if (i < 0) { job.status = 'stitching'; return job.save(); }
     try {
       let data;
-      if (job.mode === 'ai' && Date.now() - gpuDownAt < 1800000 && (process.env.PIXABAY_KEY)) { job.mode = 'stock'; job.note = 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)'; await job.save(); }
+      if (job.mode === 'ai' && Date.now() - gpuDownAt < 1800000 && fallbackMode() !== 'still') { job.mode = fallbackMode(); job.note = NOTE[job.mode]; await job.save(); }
       if (job.mode === 'ai' || !job.mode) {
         try {
           const url = await generateClip({ prompt: job.scenes[i].prompt, seconds: 4, width: W, height: H });
@@ -117,10 +124,22 @@ async function step(job) {
           gpuDownAt = Date.now();
           const done = job.scenes.filter(s => s.state === 'ok').length;
           if (done) { await VideoBlob.deleteMany({ jobId: job._id, kind: { $in: ['clip', 'audio'] } }); job.scenes.forEach(s => { s.state = 'wait'; }); }
-          job.mode = process.env.PIXABAY_KEY ? 'stock' : 'still'; job.note = process.env.PIXABAY_KEY ? 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)' : 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion'; await job.save();
+          job.mode = fallbackMode(); job.note = NOTE[job.mode]; await job.save();
         }
       }
-      if (job.mode === 'stock') { data = await stockClip(job, i); job.note = 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)'; }
+      if (job.mode === 'agnes') {
+        try {
+          const wait = agnesAt + 62000 - Date.now(); if (wait > 0) await new Promise(x => setTimeout(x, wait));
+          agnesAt = Date.now(); const t0 = Date.now(); const out = await generateAgnesClip({ prompt: job.scenes[i].prompt });
+          const r = await fetch(out.url, { signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Could not download the Agnes clip.');
+          data = Buffer.from(await r.arrayBuffer()); job.note = `${NOTE.agnes} (${out.size || '?'}, ${Math.round((Date.now() - t0) / 1000)}s/clip)`;
+        } catch (e) {
+          console.error('agnes', e.message.slice(0, 160));
+          if (!process.env.PIXABAY_KEY) throw e;
+          data = await stockClip(job, i); job.note = `${NOTE.agnes} + Pixabay stock for some scenes (${e.message.slice(0, 60)})`;
+        }
+      }
+      if (job.mode === 'stock') { data = await stockClip(job, i); job.note = NOTE.stock; }
       if (job.mode === 'still') data = await stillClip(job.scenes[i].prompt, i);
       await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'clip', idx: i, data });
       job.scenes[i].state = 'ok'; await job.save();
@@ -139,7 +158,7 @@ let busy = false;
 async function tick() {
   if (busy || mongoose.connection.readyState !== 1) return; busy = true;
   try {
-    const job = await VideoJob.findOneAndUpdate({ status: { $nin: ['done', 'failed'] }, $or: [{ lockUntil: null }, { lockUntil: { $lt: new Date() } }] }, { lockUntil: new Date(Date.now() + 5 * 60000) }, { new: true, sort: 'createdAt' });
+    const job = await VideoJob.findOneAndUpdate({ status: { $nin: ['done', 'failed'] }, $or: [{ lockUntil: null }, { lockUntil: { $lt: new Date() } }] }, { lockUntil: new Date(Date.now() + 10 * 60000) }, { new: true, sort: 'createdAt' });
     if (!job) return;
     try { await step(job); } catch (e) { console.error('video job', String(job._id), e.message); job.status = 'failed'; job.error = String(e.message).slice(0, 200); await job.save(); }
     await VideoJob.updateOne({ _id: job._id }, { lockUntil: null });
