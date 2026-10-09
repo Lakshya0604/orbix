@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { api, stream } from './api.js';
+import { api, stream, token } from './api.js';
 import Tilt from './Tilt.jsx';
 const Orbit3D = lazy(() => import('./Orbit3D.jsx'));
 import { orbi, orbiContext } from './Mascot.jsx';
@@ -41,7 +41,7 @@ export default function Hub({ user, dark, setDark, logout }) {
   const [servers, setServers] = useState([]);
   const [catalog, setCatalog] = useState({ servers: [], rejected: [] });
   const [health, setHealth] = useState({});
-  const [chats, setChats] = useState([]);
+  const [chats, setChats] = useState([]); const [docs, setDocs] = useState([]); const [upBusy, setUpBusy] = useState(false);
   const [chatId, setChatId] = useState(null);
   const [msgs, setMsgs] = useState([]);
   const [live, setLive] = useState(null); // {steps, status}
@@ -66,8 +66,17 @@ export default function Hub({ user, dark, setDark, logout }) {
   useEffect(() => { const t = setTimeout(() => orbi('wave', user.guest ? `Hi! This is the demo, you get ${user.guestLeft} free tasks. Tap an example below.` : `Hey ${user.name.split(' ')[0]}! Pick an example or ask for anything.`, 7000), 900); return () => clearTimeout(t); }, []);
   useEffect(() => { if (busy) orbi('thinking', 'Working on it…', 60000); }, [busy]);
   const loadServers = useCallback(async () => setServers(await api('/api/servers')), []);
+  const loadDocs = useCallback(async () => setDocs(await api('/api/docs').catch(() => [])), []);
+  const upload = async e => {
+    const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
+    if (f.size > 6 * 1024 * 1024) { say('File is over 6 MB.'); return; }
+    setUpBusy(true);
+    try { const r = await fetch(`/api/docs?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token()}` }, body: f }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Upload failed'); say(`${j.name} added (${j.chunks} parts)`); loadDocs(); } catch (x) { say(x.message); }
+    setUpBusy(false);
+  };
+  const removeDoc = async id => { await api(`/api/docs/${id}`, { method: 'DELETE' }); loadDocs(); };
   const loadChats = useCallback(async () => setChats(await api('/api/chats')), []);
-  useEffect(() => { loadServers(); loadChats(); api('/api/catalog').then(setCatalog); api('/api/servers/reconnect-all', { method: 'POST' }).catch(() => {}); }, [loadServers, loadChats]);
+  useEffect(() => { loadServers(); loadChats(); loadDocs(); api('/api/catalog').then(setCatalog); api('/api/servers/reconnect-all', { method: 'POST' }).catch(() => {}); }, [loadServers, loadChats, loadDocs]);
   // live status stream for the left panel
   useEffect(() => {
     const ctrl = new AbortController(); let stop = false;
@@ -133,7 +142,7 @@ export default function Hub({ user, dark, setDark, logout }) {
       <div className="layout">
         <aside className={`side ${drawer ? 'open' : ''}`}>
           <div className="tabs" role="tablist">
-            {[['servers', `Servers · ${connectedCount}`], ['catalog', `Catalog · ${catalog.servers.length}`], ['chats', `Chats · ${chats.length}`]].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
+            {[['servers', `Servers · ${connectedCount}`], ['catalog', `Catalog · ${catalog.servers.length}`], ['chats', `Chats · ${chats.length}`], ['docs', `Docs · ${docs.length}`]].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
           </div>
           <div className="side-body">
           {tab === 'servers' && <section>
@@ -168,6 +177,12 @@ export default function Hub({ user, dark, setDark, logout }) {
               <input placeholder="Your own API key / token (optional, stored encrypted)" type="password" value={custom.apiKey} onChange={e => setCustom({ ...custom, apiKey: e.target.value })} />
               <button className="btn primary sm">Connect</button>
             </form>}
+          </section>}
+          {tab === 'docs' && <section>
+            <label className="chip accent block" style={{ cursor: 'pointer', textAlign: 'center' }}>{upBusy ? 'Reading your file…' : '+ Upload a document'}<input type="file" hidden disabled={upBusy} accept=".pdf,.docx,.txt,.md,.csv,.json,.html,.log" onChange={upload} /></label>
+            <p className="hint">PDF, DOCX, TXT, MD, CSV or JSON, up to 6 MB. Your chat searches these files when a question needs them, together with your MCP tools. Only you can see them.</p>
+            {docs.map(d => <div key={d.id} className="chat-row"><button style={{ cursor: 'default' }}>{d.name} <small>· {d.chunks} parts</small></button><button className="x" onClick={() => removeDoc(d.id)} aria-label="Delete document">×</button></div>)}
+            {!docs.length && <p className="empty">No documents yet. Upload one, then ask a question about it in the chat.</p>}
           </section>}
           {tab === 'chats' && <section>
             <button className="chip accent block" onClick={newChat}>+ New chat</button>
