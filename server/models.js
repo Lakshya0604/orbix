@@ -7,6 +7,7 @@ export const User = model('User', new Schema({
   name: { type: String, default: '' },
   passwordHash: String,
   googleId: { type: String, index: true, sparse: true },
+  githubId: { type: String, index: true, sparse: true },
   resetHash: String, resetExpires: Date,
 }, { timestamps: true }));
 export const Server = model('Server', new Schema({
