@@ -66,6 +66,16 @@ export default function Hub({ user, dark, setDark, logout }) {
   useEffect(() => { const t = setTimeout(() => orbi('wave', user.guest ? `Hi! This is the demo, you get ${user.guestLeft} free tasks. Tap an example below.` : `Hey ${user.name.split(' ')[0]}! Pick an example or ask for anything.`, 7000), 900); return () => clearTimeout(t); }, []);
   useEffect(() => { if (busy) orbi('thinking', 'Working on it…', 60000); }, [busy]);
   const loadServers = useCallback(async () => setServers(await api('/api/servers')), []);
+  const [vids, setVids] = useState({ enabled: false, jobs: [] }); const [vTopic, setVTopic] = useState(''); const [vErr, setVErr] = useState(''); const [vPlay, setVPlay] = useState(null);
+  const loadVids = useCallback(async () => { try { setVids(await api('/api/videos')); } catch {} }, []);
+  const activeVid = vids.jobs.some(j => !['done', 'failed'].includes(j.status));
+  useEffect(() => { loadVids(); }, [loadVids]);
+  useEffect(() => { if (!activeVid) return; const t = setInterval(loadVids, 4000); return () => clearInterval(t); }, [activeVid, loadVids]);
+  const makeVid = async e => { e.preventDefault(); setVErr(''); try { await api('/api/videos', { method: 'POST', body: { topic: vTopic } }); setVTopic(''); loadVids(); } catch (x) { setVErr(x.message); } };
+  const fetchVid = async id => { const r = await fetch(`/api/videos/${id}/file`, { headers: { authorization: `Bearer ${token()}` } }); if (!r.ok) throw new Error('Could not load the video.'); return URL.createObjectURL(await r.blob()); };
+  const playVid = async id => { try { setVPlay({ id, url: await fetchVid(id) }); } catch (x) { setVErr(x.message); } };
+  const saveVid = async (id, name) => { try { const u = await fetchVid(id); const a = document.createElement('a'); a.href = u; a.download = `${(name || 'orbix-short').replace(/[^\w]+/g, '-').slice(0, 40)}.mp4`; a.click(); } catch (x) { setVErr(x.message); } };
+  const removeVid = async id => { await api(`/api/videos/${id}`, { method: 'DELETE' }); if (vPlay?.id === id) setVPlay(null); loadVids(); };
   const loadDocs = useCallback(async () => setDocs(await api('/api/docs').catch(() => [])), []);
   const upload = async e => {
     const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
@@ -143,7 +153,7 @@ export default function Hub({ user, dark, setDark, logout }) {
       <div className="layout">
         <aside className={`side ${drawer ? 'open' : ''}`}>
           <div className="tabs" role="tablist">
-            {[['servers', `Servers · ${connectedCount}`], ['catalog', `Catalog · ${catalog.servers.length}`], ['chats', `Chats · ${chats.length}`], ['docs', `Docs · ${docs.length}`]].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
+            {[['servers', `Servers · ${connectedCount}`], ['catalog', `Catalog · ${catalog.servers.length}`], ['chats', `Chats · ${chats.length}`], ['docs', `Docs · ${docs.length}`], ['videos', `Videos · ${vids.jobs.length}`]].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
           </div>
           <div className="side-body">
           {tab === 'servers' && <section>
@@ -178,6 +188,20 @@ export default function Hub({ user, dark, setDark, logout }) {
               <input placeholder="Your own API key / token (optional, stored encrypted)" type="password" value={custom.apiKey} onChange={e => setCustom({ ...custom, apiKey: e.target.value })} />
               <button className="btn primary sm">Connect</button>
             </form>}
+          </section>}
+          {tab === 'videos' && <section>
+            <form onSubmit={makeVid} className="vid-form"><input value={vTopic} onChange={e => setVTopic(e.target.value)} placeholder="Topic, e.g. a haunted lighthouse" maxLength={200} disabled={!vids.enabled} /><button className="btn primary sm" disabled={!vids.enabled || vTopic.trim().length < 3 || activeVid}>Make video</button></form>
+            <p className="hint">Orbix writes a short script, makes about 4 AI clips and stitches them. It runs in the background, so you can leave. Free limits: 1 at a time, 4 a day, short silent clips (about 12 seconds in total).</p>
+            {vErr && <div className="msg err" role="alert">{vErr}</div>}
+            {vids.jobs.map(j => <div key={j.id} className="vid-card">
+              <div className="vid-top"><b>{j.title || j.topic}</b><span className={`vid-st st-${j.status}`}>{{ queued: 'Waiting', scripting: 'Writing script', clips: `Clips ${j.scenes.filter(x => x === 'ok').length}/${j.scenes.length || '?'}`, stitching: 'Stitching', done: 'Ready', failed: 'Failed' }[j.status]}</span></div>
+              {!['done', 'failed'].includes(j.status) && <div className="vid-bar"><i style={{ width: `${{ queued: 4, scripting: 12, clips: 15 + 60 * (j.scenes.filter(x => x === 'ok').length / Math.max(1, j.scenes.length)), stitching: 92 }[j.status]}%` }} /></div>}
+              {j.error && <p className="hint">{j.error}</p>}{j.note && j.status === 'done' && <p className="hint">{j.note}</p>}
+              {j.status === 'done' && <div className="vid-act"><button className="btn ghost sm" onClick={() => playVid(j.id)}>Play</button><button className="btn primary sm" onClick={() => saveVid(j.id, j.title)}>Download</button><button className="x" onClick={() => removeVid(j.id)} aria-label="Delete video">×</button></div>}
+              {j.status === 'failed' && <div className="vid-act"><button className="x" onClick={() => removeVid(j.id)} aria-label="Delete">×</button></div>}
+              {vPlay?.id === j.id && <video src={vPlay.url} controls playsInline className="vid-player" />}
+            </div>)}
+            {!vids.jobs.length && <p className="empty">{vids.enabled ? 'No videos yet. Type a topic above.' : 'Video is not switched on for this app yet.'}</p>}
           </section>}
           {tab === 'docs' && <section>
             <label className="chip accent block" style={{ cursor: 'pointer', textAlign: 'center' }}>{upBusy ? 'Reading your file…' : '+ Upload a document'}<input type="file" hidden disabled={upBusy} accept=".pdf,.docx,.txt,.md,.csv,.json,.html,.log" onChange={upload} /></label>
