@@ -147,7 +147,7 @@ export default function Hub({ user, dark, setDark, logout }) {
         <span className="live-pill"><span className="pulse connected" />{connectedCount} live</span>
         <button className="icon-btn" onClick={() => setDark(!dark)} aria-label="Toggle dark mode">{dark ? '☀' : '☾'}</button>
         {user.guest && <a className="chip accent" href="#/signup" onClick={logout}>Create account</a>}
-        <div className="user"><span>{user.name}</span><button className="chip" onClick={logout}>{user.guest ? 'Exit demo' : 'Log out'}</button></div>
+        <div className="user"><span>{user.name}</span><button className="chip" onClick={() => window.dispatchEvent(new Event('orbi-pick'))} aria-label="Change buddy" title="Change buddy">🎭 Buddy</button><button className="chip" onClick={logout}>{user.guest ? 'Exit demo' : 'Log out'}</button></div>
       </header>
 
       <div className="layout">
