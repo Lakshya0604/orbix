@@ -343,7 +343,7 @@ app.delete('/api/videos/:id', auth, wrap(async (q, r) => { const job = await Vid
 const SELFTEST = new mongoose.Types.ObjectId('000000000000000000000001');
 app.get('/api/health/pipeline', wrap(async (q, r) => {
   if (!imageEnabled()) return r.json({ configured: false });
-  const wantLong = q.query.long === '1'; const want = wantLong ? 'a lonely lighthouse keeper who hears knocking from inside the locked tower door' : q.query.lang === 'hi' ? 'चाँद पर इंसान के पहले कदम की कहानी' : 'a lighthouse on a stormy coast at night';
+  const wantLong = q.query.long === '1'; const want = wantLong && q.query.lang === 'hi' ? 'एक अकेला चौकीदार जिसे बंद मीनार के दरवाज़े के अंदर से दस्तक सुनाई देती है' : wantLong ? 'a lonely lighthouse keeper who hears knocking from inside the locked tower door' : q.query.lang === 'hi' ? 'चाँद पर इंसान के पहले कदम की कहानी' : 'a lighthouse on a stormy coast at night';
   let job = await VideoJob.findOne({ userId: SELFTEST }).sort('-createdAt');
   if (!job || job.topic !== want || !!job.long !== wantLong || (job.status === 'done' && !/vertical/.test(job.note || '')) || (Date.now() - new Date(job.createdAt) > 3600000 && ['done', 'failed'].includes(job.status)) || (job.status === 'failed' && Date.now() - new Date(job.createdAt) > 300000) || (!['done', 'failed'].includes(job.status) && Date.now() - new Date(job.createdAt) > (wantLong ? 2400000 : 480000))) { await VideoJob.deleteMany({ userId: SELFTEST }); job = await startJob(SELFTEST, want, wantLong); }
   r.json({ ...publicJob(job), final: job.status === 'done' ? (await VideoBlob.findOne({ jobId: job._id, kind: 'final' }).select('_id').lean()) ? 'stored' : 'missing' : null });
