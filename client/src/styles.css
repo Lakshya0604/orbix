@@ -136,9 +136,9 @@ input:focus,textarea:focus{border-color:var(--v);box-shadow:0 0 0 4px rgba(109,5
 .msg.err{margin-top:12px}
 /* Orbi mascot */
 .orbi{position:fixed;right:14px;bottom:14px;z-index:55;display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:calc(100vw - 28px)}
-.orbi-btn{width:84px;height:84px;border:0;background:none;padding:0;filter:drop-shadow(0 10px 14px rgba(60,30,140,.35));transition:transform .2s}.orbi-btn:hover{transform:scale(1.08) rotate(-3deg)}
+.orbi-btn{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:grab;width:84px;height:84px;border:0;background:none;padding:0;filter:drop-shadow(0 10px 14px rgba(60,30,140,.35));transition:transform .2s}.orbi-btn:hover{transform:scale(1.08) rotate(-3deg)}
 .orbi-svg{width:100%;height:100%;overflow:visible}
-.orbi-svg .eye{fill:#7df0ff}.orbi-svg .eyeline,.orbi-svg .mouth{fill:none;stroke:#7df0ff;stroke-width:4;stroke-linecap:round}
+.orbi-svg .eye{fill:var(--eye,#7df0ff)}.orbi-svg .eyeline,.orbi-svg .mouth{fill:none;stroke:var(--eye,#7df0ff);stroke-width:4;stroke-linecap:round}
 .orbi-svg .shadow{fill:rgba(0,0,0,.18)}
 .orbi-svg .body{transform-box:fill-box;transform-origin:50% 100%;animation:ob-float 3.2s ease-in-out infinite}
 .orbi-svg .ant{animation:ob-ant 1.6s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
@@ -253,3 +253,13 @@ input:focus,textarea:focus{border-color:var(--v);box-shadow:0 0 0 4px rgba(109,5
 .attach-menu>*{display:grid;grid-template-columns:34px 1fr;grid-template-rows:auto auto;align-items:center;column-gap:8px;width:100%;padding:9px 10px;border-radius:12px;text-align:left;background:none;border:0;cursor:pointer;color:inherit}
 .attach-menu>*:hover{background:rgba(109,59,255,.09)}.attach-menu span{grid-row:1/3;font-size:22px;text-align:center}.attach-menu b{font-size:14px}.attach-menu small{opacity:.6;font-size:12px}
 @keyframes attachIn{from{opacity:0;transform:translateY(8px) scale(.96)}to{opacity:1;transform:none}}
+
+.orbi{will-change:transform}.orbi.dragging .orbi-btn{cursor:grabbing;transform:scale(1.1);transition:none}.orbi.flip{flex-direction:column-reverse}
+.m-angry .body{animation:ob-shake .18s ease-in-out infinite}.m-angry .ant{fill:#e0383e}.m-angry .mouth{stroke:#ff6a6a}.m-angry .eye{fill:#ff6a6a}.m-angry .eyeline{stroke:#ff6a6a}
+.m-love .body{animation:ob-hop .8s ease-in-out infinite}
+.hearts{position:absolute;left:50%;top:6px;pointer-events:none}.hearts i{position:absolute;font-style:normal;font-size:16px;opacity:0;animation:ob-heart 1.4s ease-out forwards}.hearts i:nth-child(1){left:-18px}.hearts i:nth-child(2){left:2px;animation-delay:.25s}.hearts i:nth-child(3){left:20px;animation-delay:.5s}
+@keyframes ob-heart{0%{opacity:0;transform:translateY(8px) scale(.6)}25%{opacity:1}100%{opacity:0;transform:translateY(-44px) scale(1.2)}}
+.orbi-svg .halo{animation:ob-halo 2.4s ease-in-out infinite;transform-box:fill-box;transform-origin:center}@keyframes ob-halo{50%{transform:scale(1.12);opacity:.7}}
+.orbi-pick{display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);overflow-x:auto}.orbi-pick button{flex:1;min-width:52px;border:1.5px solid var(--line);background:none;border-radius:12px;padding:4px 2px;display:flex;flex-direction:column;align-items:center;gap:2px;color:inherit;cursor:pointer}.orbi-pick button.on{border-color:var(--brand,#6d3bff);background:rgba(109,59,255,.08)}.orbi-pick svg{width:38px;height:38px}.orbi-pick small{font-size:10.5px;font-weight:700}
+.buddies{display:flex;gap:8px;margin:2px 0 12px}.buddies button{flex:1;border:1.5px solid var(--line);background:var(--card);border-radius:14px;padding:6px 2px 4px;display:flex;flex-direction:column;align-items:center;gap:2px;color:inherit;cursor:pointer;transition:transform .15s,border-color .15s}.buddies button:hover{transform:translateY(-2px)}.buddies button.on{border-color:#6d3bff;box-shadow:0 0 0 3px rgba(109,59,255,.15)}.buddies svg{width:44px;height:44px}.buddies small{font-size:11px;font-weight:800}
+@media(prefers-reduced-motion:reduce){.hearts i,.orbi-svg .halo{animation:none}}
