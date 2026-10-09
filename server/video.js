@@ -39,7 +39,7 @@ async function script(job) {
     outline = `Story title: ${o.title}\n` + o.acts.map((x, i) => `${i + 1}. ${x.act}: ${x.beat}`).join('\n'); job.title = String(o.title || job.topic).slice(0, 80);
   }
   let j = null;
-  const sysFor = (n, extra) => `You write vertical YouTube Shorts style narrated stories. Reply with ONLY valid JSON (never use double quote characters inside the text values): {"title":"...","scenes":[{"act":"intro","shot":"...","kw":"...","say":"..."}]}. Exactly ${n} scenes. ${ARC} "act" is one of intro, buildup, twist, climax, ending. "shot" is ONE visual description in English, 20 to 40 words, concrete (subject, setting, light, camera move), no text overlays, no real people or brands. "kw" is 2 or 3 plain English words to search a stock video site for this shot (for example "lighthouse storm sea"). "say" is the narration for that shot, spoken in the same language as the user's topic (English if unsure; Hindi in Devanagari script if the topic is Hindi or Hinglish): ${job.long ? '1 or 2 sentences of 12 to 22 words' : 'ONE sentence of 8 to 12 words'}.${extra || ''}`;
+  const sysFor = (n, extra) => `You write vertical YouTube Shorts style narrated stories. Reply with ONLY valid JSON (never use double quote characters inside the text values): {"title":"...","scenes":[{"act":"intro","shot":"...","kw":"...","say":"..."}]}. Exactly ${n} scenes. ${ARC} "act" is one of intro, buildup, twist, climax, ending. "shot" is ONE visual description in English, 20 to 40 words, concrete (subject, setting, light, camera move), no text overlays, no real people or brands. "kw" is TWO stock-footage search phrases separated by a pipe: the first for what the FIRST half of the narration says, the second for the SECOND half, each 2 or 3 plain English words naming a visible, moving real-world subject that a stock site would have (for example "storm waves crash|old wooden door"). Never abstract words, never names of people, always English even when the narration is Hindi. "say" is the narration for that shot, spoken in the same language as the user's topic (English if unsure; Hindi in Devanagari script if the topic is Hindi or Hinglish): ${job.long ? '1 or 2 sentences of 12 to 22 words' : 'ONE sentence of 8 to 12 words'}.${extra || ''}`;
   if (job.long) {
     const plan = [['intro', 3], ['buildup', 3], ['twist', 2], ['climax', 3], ['ending', 3]]; const acc = [];
     for (const [act, n] of plan) {
@@ -58,7 +58,7 @@ async function script(job) {
     const x = jsonOf(m.content); if (x && Array.isArray(x.scenes) && x.scenes.length >= Math.min(N, 4)) j = x;
   }
   if (!j) throw new Error('The script came back broken. Try again.');
-  const scenes = j.scenes.map(x => typeof x === 'string' ? { act: '', shot: x, kw: '', say: '' } : { act: String(x?.act || ''), shot: String(x?.shot || ''), kw: String(x?.kw || ''), say: String(x?.say || '') }).filter(x => x.shot).slice(0, N).map(x => ({ act: x.act.slice(0, 12), prompt: x.shot.slice(0, 400), kw: x.kw.replace(/[^\w ]/g, ' ').slice(0, 60).trim(), say: x.say.slice(0, 320) }));
+  const scenes = j.scenes.map(x => typeof x === 'string' ? { act: '', shot: x, kw: '', say: '' } : { act: String(x?.act || ''), shot: String(x?.shot || ''), kw: String(x?.kw || ''), say: String(x?.say || '') }).filter(x => x.shot).slice(0, N).map(x => ({ act: x.act.slice(0, 12), prompt: x.shot.slice(0, 400), kw: x.kw.replace(/[^\w |]/g, ' ').slice(0, 110).trim(), say: x.say.slice(0, 320) }));
   if (scenes.length < 2) throw new Error('The script came back empty. Try another topic.');
   job.title = String(job.title || j.title || job.topic).slice(0, 80); job.scenes = scenes; job.status = 'clips'; job.stage = `Story ready: ${scenes.length} scenes`; await job.save();
 }
@@ -109,23 +109,37 @@ async function stillClip(prompt, i) {
 }
 
 // Stock fallback (free Pixabay API key): real stock footage for the scene keywords, cropped to 9:16 and trimmed to 4.5 s.
+const staticClip = async f => { try { const { stderr } = await run(ffmpegPath, ['-i', f, '-vf', 'scale=96:-2,freezedetect=n=0.004:d=1.5', '-an', '-f', 'null', '-'], { timeout: 30000 }); return /freeze_start/.test(String(stderr || '')); } catch { return false; } };
 async function stockClip(job, i) {
   const key = process.env.PIXABAY_KEY; if (!key) throw new Error('No stock key set.');
-  const sc = job.scenes[i]; const mark = async t => { job.note = `stock ${i}: ${t}`; await job.save().catch(() => {}); }; await mark('search'); const base = String(sc.kw || sc.prompt).split(/\s+/).slice(0, 4).join(' ');
-  let hit = null;
-  for (const q of [base, base.split(' ').slice(0, 2).join(' '), String(job.topic).split(/\s+/).slice(0, 3).join(' '), 'nature']) {
-    const r = await fetch(`https://pixabay.com/api/videos/?key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}&per_page=20&safesearch=true`, { signal: AbortSignal.timeout(20000) });
-    if (!r.ok) throw new Error(`Stock service said HTTP ${r.status}.`);
-    const hits = ((await r.json()).hits || []).filter(h => (h.duration || 0) >= 3 && h.videos?.medium?.url);
-    if (hits.length) { hit = hits[(i * 3 + Date.now()) % Math.min(hits.length, 8)]; break; }
-  }
-  await mark('download'); if (!hit) throw new Error('No stock footage found for this topic.');
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-s-'));
+  const sc = job.scenes[i]; const mark = async t => { job.note = `stock ${i}: ${t}`; await job.save().catch(() => {}); };
+  const parts = String(sc.kw || sc.prompt).split('|').map(x => x.trim()).filter(Boolean);
+  const K = job.long ? 2 : 1; const queries = []; for (let k = 0; k < K; k++) queries.push(parts[k] || parts[0] || String(sc.prompt));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-s-')); const used = new Set(); const files = [];
+  const search = async q => { const r = await fetch(`https://pixabay.com/api/videos/?key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}&per_page=20&safesearch=true`, { signal: AbortSignal.timeout(20000) }); if (!r.ok) throw new Error(`Stock service said HTTP ${r.status}.`); return ((await r.json()).hits || []).filter(h => (h.duration || 0) >= 4 && h.videos?.medium?.url); };
+  const encode = async (src, out, flip) => run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', src, '-t', '4.5', '-an', '-threads', '1', '-vf', `${flip ? 'hflip,scale=' + Math.round(W * 1.3) + ':' + Math.round(H * 1.3) + ',crop=' + W + ':' + H + ',' : ''}scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=24,format=yuv420p`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-movflags', '+faststart', out], { timeout: 90000 });
   try {
-    const r = await fetch((hit.videos.small?.url || hit.videos.medium.url), { signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Could not download stock footage.');
-    const src = path.join(dir, 's.mp4'), out = path.join(dir, 'o.mp4'); await fs.writeFile(src, Buffer.from(await r.arrayBuffer())); await mark('encode');
-    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', src, '-t', '4.5', '-an', '-threads', '1', '-vf', `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=24,format=yuv420p`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-movflags', '+faststart', out], { timeout: 90000 });
-    return await fs.readFile(out);
+    for (let k = 0; k < K; k++) {
+      const words = queries[k].split(/\s+/).filter(Boolean); const tries = [queries[k], words.slice(0, 2).join(' '), String(job.topic).split(/\s+/).slice(0, 3).join(' '), 'nature'];
+      let ok = false, lastSrc = null, weak = null;
+      for (const q of tries) {
+        if (ok) break; await mark(`search ${k + 1}/${K}`);
+        const hits = (await search(q)).filter(h => !used.has(h.id)).slice(0, 10); const start = (i * 3 + k) % Math.max(1, Math.min(hits.length, 6));
+        for (let t = 0; t < Math.min(hits.length, 3) && !ok; t++) {
+          const hit = hits[(start + t) % hits.length]; used.add(hit.id);
+          const r = await fetch(hit.videos.small?.url || hit.videos.medium.url, { signal: AbortSignal.timeout(60000) }); if (!r.ok) continue;
+          const src = path.join(dir, `s${k}_${t}.mp4`), out = path.join(dir, `o${k}_${t}.mp4`); await fs.writeFile(src, Buffer.from(await r.arrayBuffer())); lastSrc = src; await mark(`encode ${k + 1}/${K}`);
+          await encode(src, out, false); if (await staticClip(out)) { weak = weak || out; continue; } files.push(out); ok = true;
+        }
+      }
+      if (!ok && weak) { files.push(weak); ok = true; }
+      if (!ok && !files.length) throw new Error('No stock footage found for this topic.');
+      if (!ok) { const out = path.join(dir, `v${k}.mp4`); await encode(files[0].replace(/o(\d+_\d+)\.mp4$/, (m, g) => `s${g}.mp4`), out, true); files.push(out); }
+    }
+    if (files.length === 1) return await fs.readFile(files[0]);
+    const list = path.join(dir, 'l.txt'); await fs.writeFile(list, files.map(f => `file '${f}'`).join('\n')); const outF = path.join(dir, 'final.mp4');
+    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', outF], { timeout: 60000 });
+    return await fs.readFile(outF);
   } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
 const NOTE = { agnes: 'Free AI-video GPU was used up today, so this one uses Agnes AI video', stock: 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)', still: 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion' };
