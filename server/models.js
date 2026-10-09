@@ -27,3 +27,11 @@ export const Chat = model('Chat', new Schema({
   shareId: { type: String, unique: true, sparse: true },
   messages: { type: Array, default: [] }, // {role, content, steps?}
 }, { timestamps: true }));
+export const Visit = model('Visit', new Schema({
+  day: { type: String, index: true },
+  path: String,
+  ref: String,
+  vid: String, // daily-rotating hash, no raw IP stored
+  device: String,
+  at: { type: Date, default: Date.now, expires: 60 * 60 * 24 * 180 },
+}));
