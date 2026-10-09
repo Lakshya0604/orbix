@@ -18,7 +18,7 @@ function Mermaid({ code }) {
       try {
         const m = (await import('mermaid')).default;
         const dark = document.documentElement.dataset.theme === 'dark';
-        m.initialize({ startOnLoad: false, securityLevel: 'strict', theme: dark ? 'dark' : 'neutral', fontFamily: 'inherit' });
+        m.initialize({ startOnLoad: false, securityLevel: 'strict', theme: dark ? 'dark' : 'base', themeVariables: dark ? undefined : { primaryColor: '#efe9ff', primaryBorderColor: '#6d3bff', lineColor: '#7a6fa8', primaryTextColor: '#1d1830', fontSize: '14px' }, fontFamily: 'inherit' });
         const { svg } = await m.render(`mmd${++mid}`, code);
         if (!dead) setSvg(svg);
       } catch { if (!dead) setErr(true); }
