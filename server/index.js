@@ -277,7 +277,7 @@ async function ensureConnected(userId) {
 app.post('/api/servers/reconnect-all', auth, wrap(async (q, r) => { await ensureConnected(q.user._id); r.json({ ok: true }); }));
 
 // ---------- chat ----------
-app.get('/api/chats', auth, wrap(async (q, r) => r.json((await Chat.find({ userId: q.user._id }).sort('-updatedAt').limit(50).select('title updatedAt')).map(c => ({ id: String(c._id), title: c.title, updatedAt: c.updatedAt })))));
+app.get('/api/chats', auth, wrap(async (q, r) => r.json((await Chat.find({ userId: q.user._id }).sort('-updatedAt').limit(100).select('title updatedAt')).map(c => ({ id: String(c._id), title: c.title, updatedAt: c.updatedAt })))));
 app.get('/api/chats/:id', auth, wrap(async (q, r) => { const c = await Chat.findOne({ _id: q.params.id, userId: q.user._id }); if (!c) throw bad('Not found', 404); r.json({ id: String(c._id), title: c.title, messages: c.messages }); }));
 app.delete('/api/chats/:id', auth, wrap(async (q, r) => { await Chat.deleteOne({ _id: q.params.id, userId: q.user._id }); r.json({ ok: true }); }));
 
