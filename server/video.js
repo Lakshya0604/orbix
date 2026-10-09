@@ -59,7 +59,8 @@ async function lyricScript(job) {
     job.songDur = Math.min(180, await dur(small)); const { segments, language } = await transcribeSong(await fs.readFile(small));
     if (!segments.length) throw new Error('I could not hear any lyrics in this song.');
     const lines = []; for (const g of segments) { const last = lines[lines.length - 1]; if (last && (last.t1 - last.t0 < 3 || g.t1 - g.t0 < 1.5) && g.t0 - last.t1 < 1.5) { last.t1 = g.t1; last.text += ' ' + g.text; } else lines.push({ ...g }); }
-    const L = lines.slice(0, 30); job.stage = 'Planning the visuals'; await job.save();
+    const split = []; for (const l of lines) { const d = l.t1 - l.t0; if (d <= 8) { split.push(l); continue; } const w = l.text.split(/\s+/), n = Math.ceil(d / 6); for (let k = 0; k < n; k++) { const a = Math.round(w.length * k / n), b = Math.round(w.length * (k + 1) / n); if (b > a) split.push({ t0: l.t0 + d * k / n, t1: l.t0 + d * (k + 1) / n, text: w.slice(a, b).join(' ') }); } }
+    const L = split.slice(0, 30); job.stage = 'Planning the visuals'; await job.save();
     let vis = [];
     for (let i = 0; i < L.length; i += 10) {
       const part = L.slice(i, i + 10); let got = null;
@@ -183,7 +184,7 @@ async function stockClip(job, i) {
   const key = process.env.PIXABAY_KEY; if (!key) throw new Error('No stock key set.');
   const sc = job.scenes[i]; const mark = async t => { job.note = `stock ${i}: ${t}`; await job.save().catch(() => {}); };
   const parts = String(sc.kw || sc.prompt).split('|').map(x => x.trim()).filter(Boolean);
-  const K = job.lyric ? Math.min(3, Math.max(1, Math.ceil(((sc.t1 || 0) - (sc.t0 || 0) + 0.5) / 4.5))) : job.long ? 2 : 1; const queries = []; for (let k = 0; k < K; k++) queries.push(parts[k] || parts[0] || String(sc.prompt));
+  const K = job.lyric ? Math.min(2, Math.max(1, Math.ceil(((sc.t1 || 0) - (sc.t0 || 0) + 0.5) / 4.5))) : job.long ? 2 : 1; const queries = []; for (let k = 0; k < K; k++) queries.push(parts[k] || parts[0] || String(sc.prompt));
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-s-')); const used = new Set(); const files = [];
   const search = async q => { const r = await fetch(`https://pixabay.com/api/videos/?key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}&per_page=20&safesearch=true${ANIM.test(job.topic) ? '&video_type=animation' : ''}`, { signal: AbortSignal.timeout(20000) }); if (!r.ok) throw new Error(`Stock service said HTTP ${r.status}.`); return ((await r.json()).hits || []).filter(h => (h.duration || 0) >= 4 && h.videos?.medium?.url); };
   const encode = async (src, out, flip) => run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', src, '-t', '4.5', '-an', '-threads', '1', '-vf', `${flip ? 'hflip,scale=' + Math.round(W * 1.3) + ':' + Math.round(H * 1.3) + ',crop=' + W + ':' + H + ',' : ''}scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=24,format=yuv420p`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-movflags', '+faststart', out], { timeout: 90000 });
