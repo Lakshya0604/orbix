@@ -99,10 +99,11 @@ async function script(job) {
       got.forEach(x => { if (x && typeof x === 'object') x.act = act; }); acc.push(...got);
     }
     j = { title: job.title, scenes: acc };
-  } else for (let tryN = 0; tryN < 3 && !j; tryN++) {
-    const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: sysFor(N, ` The scenes follow that order.`) }, { role: 'user', content: `Topic: ${job.topic}` }] });
-    const x = jsonOf(m.content); if (x && Array.isArray(x.scenes) && x.scenes.length >= Math.min(N, 4)) j = x;
+  } else { let why = ''; for (let tryN = 0; tryN < 6 && !j; tryN++) {
+    let m; try { m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: sysFor(N, ` The scenes follow that order.`) }, { role: 'user', content: `Topic: ${job.topic}` }] }); } catch (e) { why = 'llm: ' + String(e.message).slice(0, 100); await new Promise(r => setTimeout(r, 8000 * (tryN + 1))); continue; }
+    const x = jsonOf(m.content); if (x && Array.isArray(x.scenes) && x.scenes.length >= Math.min(N, 4)) j = x; else why = 'parse: ' + String(m.content || '').replace(/\s+/g, ' ').slice(0, 140) + ' ...' + String(m.content || '').replace(/\s+/g, ' ').slice(-50);
   }
+  if (!j) throw new Error('The script came back broken. Try again. [' + why + ']'); }
   if (!j) throw new Error('The script came back broken. Try again.');
   const scenes = j.scenes.map(x => typeof x === 'string' ? { act: '', shot: x, kw: '', say: '' } : { act: String(x?.act || ''), shot: String(x?.shot || ''), kw: String(x?.kw || ''), say: String(x?.say || '') }).filter(x => x.shot).slice(0, N).map(x => ({ act: x.act.slice(0, 12), prompt: x.shot.slice(0, 400), kw: x.kw.replace(/[^\w |]/g, ' ').slice(0, 110).trim(), say: x.say.slice(0, 320) }));
   if (scenes.length < 2) throw new Error('The script came back empty. Try another topic.');
