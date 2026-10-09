@@ -269,3 +269,7 @@ input:focus,textarea:focus{border-color:var(--v);box-shadow:0 0 0 4px rgba(109,5
 .vid-st{font-size:11.5px;font-weight:800;padding:3px 9px;border-radius:99px;background:rgba(109,59,255,.12);color:#6d3bff;white-space:nowrap}.st-done{background:rgba(32,170,100,.15);color:#1f9d6b}.st-failed{background:rgba(224,56,62,.14);color:#e0383e}
 .vid-bar{height:6px;border-radius:9px;background:var(--line);margin-top:9px;overflow:hidden}.vid-bar i{display:block;height:100%;border-radius:9px;background:linear-gradient(90deg,#8d68ff,#22d3ee);transition:width .6s ease}
 .vid-act{display:flex;gap:8px;align-items:center;margin-top:8px}.vid-player{width:100%;margin-top:8px;border-radius:12px;background:#000;max-height:360px}
+
+.think circle{fill:var(--eye,#7df0ff);opacity:.25;animation:ob-think 1.2s ease-in-out infinite}.think circle:nth-child(2){animation-delay:.2s}.think circle:nth-child(3){animation-delay:.4s}
+@keyframes ob-think{50%{opacity:1;transform:translateY(-3px)}}
+.orbi-svg.god .body rect:first-child{filter:drop-shadow(0 0 6px rgba(255,190,40,.7))}
