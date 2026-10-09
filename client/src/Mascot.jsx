@@ -167,4 +167,4 @@ export default function Mascot({ canChat, hidden, user }) {
       </button>
     </div>
   );
-              }
+}
