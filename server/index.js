@@ -6,6 +6,7 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -304,9 +305,28 @@ app.post('/api/mascot', auth, mascotLimiter, wrap(async (q, r) => {
   r.json({ reply: String(m.content || '').slice(0, 700) || 'Hmm, I blanked out. Try again?' });
 }));
 
+// social preview image, drawn once at runtime (no image files needed)
+let ogPng;
+const makeOg = () => {
+  const W = 1200, H = 630, raw = Buffer.alloc((W * 3 + 1) * H);
+  for (let y = 0; y < H; y++) { const o = y * (W * 3 + 1); raw[o] = 0;
+    for (let x = 0; x < W; x++) {
+      let c = [250, 246, 239]; const d = Math.hypot(x - 840, y - 315), d2 = Math.hypot(x - 1030, y - 150), d3 = Math.hypot(x - 330, y - 315);
+      if (d3 < 150) { const t = (x - 180) / 300; c = [109 + (34 - 109) * t * .6, 59 + (211 - 59) * t * .6, 255 - 30 * t].map(Math.round); }
+      if (d < 190) { const t = Math.min(1, (x - 650 + y - 125) / 640); c = [109 + (34 - 109) * t, 59 + (211 - 59) * t, 255 + (238 - 255) * t].map(Math.round); }
+      if (d2 < 36) c = [255, 106, 61];
+      const i = o + 1 + x * 3; raw[i] = c[0]; raw[i + 1] = c[1]; raw[i + 2] = c[2];
+    } }
+  const crcT = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = b => { let c = 0xffffffff; for (const v of b) c = crcT[(c ^ v) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (t, d) => { const l = Buffer.alloc(4); l.writeUInt32BE(d.length); const td = Buffer.concat([Buffer.from(t), d]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([l, td, c]); };
+  const ih = Buffer.alloc(13); ih.writeUInt32BE(W, 0); ih.writeUInt32BE(H, 4); ih[8] = 8; ih[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ih), chunk('IDAT', zlib.deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0))]);
+};
+app.get('/og.png', (_q, r) => { ogPng ||= makeOg(); r.set({ 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' }).send(ogPng); });
 // ---------- static client ----------
 const dist = path.join(__dirname, '../client/dist');
-if (fs.existsSync(dist)) { app.use(express.static(dist, { maxAge: '1h' })); app.get(/^(?!\/api).*/, (_q, r) => r.sendFile(path.join(dist, 'index.html'))); }
+if (fs.existsSync(dist)) { app.use(express.static(dist, { maxAge: '1h', setHeaders: (res, f) => { if (/[\\/]assets[\\/]/.test(f)) res.setHeader('cache-control', 'public, max-age=31536000, immutable'); else if (/\.html$/.test(f)) res.setHeader('cache-control', 'no-cache'); } })); app.get(/^(?!\/api).*/, (_q, r) => r.sendFile(path.join(dist, 'index.html'))); }
 
 const port = process.env.PORT || 3000;
 if (process.env.NODE_ENV !== 'test') {
