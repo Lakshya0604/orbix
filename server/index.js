@@ -16,7 +16,7 @@ import { sendMail } from './mail.js';
 import { assertPublicUrl } from './ssrf.js';
 import * as mcp from './mcp.js';
 import { runAgent } from './agent.js';
-import { parseModel, modelInfo, runModel } from './hf.js';
+import { parseModel, modelInfo, runModel, spaceHost, spaceInfo, runSpace } from './hf.js';
 import { generateImage, imageEnabled, generateClip } from './media.js';
 import { VideoJob, VideoBlob, startJob, startWorker, publicJob } from './video.js';
 import { Doc, Chunk, addDocument, hasDocs, LIMITS } from './rag.js';
@@ -341,8 +341,14 @@ app.get('/api/health/video', wrap(async (q, r) => {
 }));
 // ---------- Hugging Face playground ----------
 const hfLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 40, keyGenerator: q => String(q.user?._id || q.ip), standardHeaders: true, legacyHeaders: false, validate: false, message: { error: 'Playground limit reached for this hour.' } });
-app.post('/api/hf/inspect', auth, hfLimiter, wrap(async (q, r) => { if (q.user.isGuest) throw bad('Create an account first.', 403); r.json(await modelInfo(parseModel(q.body?.model))); }));
-app.post('/api/hf/run', auth, hfLimiter, wrap(async (q, r) => { if (q.user.isGuest) throw bad('Create an account first.', 403); const id = parseModel(q.body?.model); const info = await modelInfo(id); try { r.json({ ...(await runModel(id, info.task, q.body?.input)), task: info.task }); } catch (e) { throw bad(e.message, e.status || 502); } }));
+app.post('/api/hf/inspect', auth, hfLimiter, wrap(async (q, r) => { if (q.user.isGuest) throw bad('Create an account first.', 403); const h = spaceHost(q.body?.model); if (h) { try { return r.json(await spaceInfo(h)); } catch (e) { throw bad(e.message, 502); } } r.json(await modelInfo(parseModel(q.body?.model))); }));
+app.post('/api/hf/run', auth, hfLimiter, wrap(async (q, r) => { if (q.user.isGuest) throw bad('Create an account first.', 403); const sh = spaceHost(q.body?.model); if (sh) { try { return r.json(await runSpace(sh, String(q.body?.endpoint || ''), Array.isArray(q.body?.values) ? q.body.values.slice(0, 30) : [])); } catch (e) { throw bad(e.message, 502); } } const id = parseModel(q.body?.model); const info = await modelInfo(id); try { r.json({ ...(await runModel(id, info.task, q.body?.input)), task: info.task }); } catch (e) { throw bad(e.message, e.status || 502); } }));
+let spHealth = { at: 0 };
+app.get('/api/health/space', healthLimiter, wrap(async (q, r) => {
+  if (Date.now() - spHealth.at < 300000) return r.json(spHealth.v);
+  let v; try { const h = spaceHost('https://huggingface.co/spaces/black-forest-labs/FLUX.1-schnell'); const info = await spaceInfo(h); const ep = info.endpoints.find(e => e.name === 'infer'); const t = Date.now(); const out = await runSpace(h, 'infer', ['a gold star', '', '', 512, 512, 2].slice(0, ep.params.length)); v = { ok: true, host: h, endpoints: info.endpoints.map(e => e.name + '/' + e.params.length), ms: Date.now() - t, out: out.items.map(i => i.kind) }; } catch (e) { v = { ok: false, error: String(e.message).slice(0, 200) }; }
+  spHealth = { at: Date.now(), v }; r.json(v);
+}));
 let hfHealth = { at: 0 };
 app.get('/api/health/hf', healthLimiter, wrap(async (q, r) => {
   if (Date.now() - hfHealth.at < 300000) return r.json(hfHealth.v);
