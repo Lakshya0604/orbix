@@ -12,7 +12,7 @@ const SUGGEST = [
   'Search the web for the latest on the Model Context Protocol and summarise it',
   'What is the current price of bitcoin and ethereum?',
 ];
-function ServerCard({ s, onReconnect, onRemove, onToggle }) {
+function ServerCard({ s, onReconnect, onRemove, onToggle, catalog, send, setDrawer }) {
   const label = { connected: 'Connected', connecting: 'Connecting…', error: 'Not working', disconnected: 'Offline' }[s.state];
   return (
     <motion.div layout className={`srv ${s.state}`} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }}>
@@ -122,7 +122,7 @@ export default function Hub({ user, dark, setDark, logout }) {
         <aside className={`side ${drawer ? 'open' : ''}`}>
           <section>
             <div className="side-h"><h3>Your servers</h3>{freeLeft > 0 && <button className="chip accent" onClick={connectAllFree}>Connect all free ({freeLeft})</button>}</div>
-            <AnimatePresence initial={false}>{servers.map(s => <ServerCard key={s.id} s={s} onReconnect={reconnect} onRemove={remove} onToggle={toggle} />)}</AnimatePresence>
+            <AnimatePresence initial={false}>{servers.map(s => <ServerCard key={s.id} s={s} onReconnect={reconnect} onRemove={remove} onToggle={toggle} catalog={catalog} send={send} setDrawer={setDrawer} />)}</AnimatePresence>
             {!servers.length && <p className="empty">Nothing connected yet. Pick a server below, or press “Connect all free”.</p>}
           </section>
           <section>
