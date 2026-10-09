@@ -2,7 +2,7 @@ import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './api.js';
 const Orbit3D = lazy(() => import('./Orbit3D.jsx'));
-import { orbi } from './Mascot.jsx';
+import { orbi, Face, BUDDIES, BUDDY_IDS } from './Mascot.jsx';
 
 const copy = {
   login: ['Welcome back', 'Sign in to see your servers and pick up where you left off.'],
@@ -13,6 +13,7 @@ const copy = {
 export default function Auth({ mode, q, dark, setDark, onDone }) {
   const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [name, setName] = useState('');
   const [err, setErr] = useState(q.get('error') ? 'Sign-in did not finish. Try again.' : ''); const [info, setInfo] = useState(''); const [busy, setBusy] = useState(false);
+  const [buddy, setBuddy] = useState(() => localStorage.getItem('orbi_avatar') || 'orbi');
   const [cfg, setCfg] = useState({ google: false, github: false });
   useEffect(() => { let on = true, n = 0; const go = () => api('/api/config').then(c => on && setCfg(c)).catch(() => { if (on && ++n < 6) setTimeout(go, 2500); }); go(); return () => { on = false; }; }, []);
   useEffect(() => { setErr(''); setInfo(''); orbi('wave', { login: 'Welcome back! Sign in to continue.', signup: 'Nice, let us set you up. Use 8+ characters for the password.', forgot: 'No stress. Enter your email and I will send a link.', reset: 'Pick a strong new password.' }[mode], 5000); }, [mode]);
@@ -21,7 +22,7 @@ export default function Auth({ mode, q, dark, setDark, onDone }) {
     e.preventDefault(); setErr(''); setInfo(''); setBusy(true);
     try {
       if (mode === 'login') onDone(await api('/api/auth/login', { method: 'POST', body: { email, password } }));
-      else if (mode === 'signup') onDone(await api('/api/auth/signup', { method: 'POST', body: { email, password, name } }));
+      else if (mode === 'signup') onDone(await api('/api/auth/signup', { method: 'POST', body: { email, password, name, avatar: buddy } }));
       else if (mode === 'forgot') { await api('/api/auth/forgot', { method: 'POST', body: { email } }); orbi('happy', 'Reset link sent. Check your inbox (and spam).'); setInfo('If that email has an account, a reset link is on its way. It works for 30 minutes.'); }
       else onDone(await api('/api/auth/reset', { method: 'POST', body: { token: q.get('token'), password } }));
     } catch (x) { setErr(x.message); orbi('worried', x.message.includes('Wrong') ? 'Hmm, that did not match. Check the email and password, or use Forgot password.' : x.message); } finally { setBusy(false); }
@@ -43,6 +44,7 @@ export default function Auth({ mode, q, dark, setDark, onDone }) {
           <div className="brand mobile-brand"><span className="logo-dot" />Orbix</div>
           <h1>{title}</h1><p className="sub">{sub}</p>
           {mode === 'signup' && <label>Name<input value={name} onChange={e => setName(e.target.value)} autoComplete="name" placeholder="Your name" /></label>}
+          {mode === 'signup' && <div><span className="sub" style={{ display: 'block', margin: '0 0 6px', fontWeight: 700 }}>Pick your buddy</span><div className="buddies">{BUDDY_IDS.map(id => <button type="button" key={id} className={id === buddy ? 'on' : ''} onClick={() => { setBuddy(id); localStorage.setItem('orbi_avatar', id); window.dispatchEvent(new CustomEvent('orbi-avatar', { detail: id })); orbi('happy', `${BUDDIES[id].name}: ${BUDDIES[id].hi}`, 3500); }} aria-label={BUDDIES[id].name} title={BUDDIES[id].tag}><Face mood="idle" buddy={id} uid="su" /><small>{BUDDIES[id].name}</small></button>)}</div></div>}
           {mode !== 'reset' && <label>Email<input type="email" required value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" placeholder="you@example.com" /></label>}
           {mode !== 'forgot' && <label>{mode === 'reset' ? 'New password' : 'Password'}<input type="password" required minLength={mode === 'login' ? 1 : 8} value={password} onChange={e => setPassword(e.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder="••••••••" /></label>}
           <AnimatePresence>{err && <motion.div role="alert" className="msg err" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0 }}>{err}</motion.div>}</AnimatePresence>
