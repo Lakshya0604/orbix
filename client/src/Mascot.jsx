@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './api.js';
@@ -100,6 +101,8 @@ export default function Mascot({ canChat, hidden, user }) {
   const updateFlip = () => { const r = root.current?.querySelector('.orbi-btn')?.getBoundingClientRect(); if (r) setFlip(r.top + r.height / 2 < window.innerHeight / 2); };
   useEffect(() => { updateFlip(); }, [open, hidden]);
 
+  const [dance, setDance] = useState(false); const held = useRef(false);
+  const playTap = () => { const now = Date.now(); taps.current = taps.current.filter(t => now - t < 2600); taps.current.push(now); const n = taps.current.length; if (n >= 4) { react('angry', B.angry, 4200); taps.current = []; } else if (n >= 2) react('worried', B.poke[n % B.poke.length], 2200); else react('happy', 'Hehe 😄', 1800); };
   const hug = () => { setHearts(h => h + 1); react('love', B.love, 3500); };
   const onDown = e => {
     drag.current = { sx: e.clientX, sy: e.clientY, ox: pos.current.x, oy: pos.current.y, moved: false, id: e.pointerId };
@@ -148,21 +151,32 @@ export default function Mascot({ canChat, hidden, user }) {
   if (hidden) return null;
   return (
     <div className={`orbi${flip ? ' flip' : ''}`} ref={root}>
-      <AnimatePresence>
+      {createPortal(<AnimatePresence>
         {open && canChat && (
-          <motion.div className="orbi-panel" initial={{ opacity: 0, y: 14, scale: .96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: .96 }} transition={{ duration: .22 }}>
-            <div className="orbi-head"><b>{B.name}{god ? ' 👑' : ''}</b><span>{god ? 'god mode' : B.tag}</span><button onClick={() => setPick(p => !p)} aria-label="Change buddy" title="Change buddy">⇄</button><button onClick={() => setOpen(false)} aria-label="Close">×</button></div>
-            {pick && <div className="orbi-pick">{BUDDY_IDS.map(id => <button key={id} className={id === buddy ? 'on' : ''} onClick={() => choose(id)} aria-label={BUDDIES[id].name}><Face mood="idle" buddy={id} uid="pk" /><small>{BUDDIES[id].name}</small></button>)}</div>}
-            <div className="orbi-log">
-              {!log.length && <p className="orbi-hello">{B.hi} Ask me how Orbix works, or tap and drag me around.</p>}
-              {log.map((m, i) => <div key={i} className={`ob-${m.role}`}>{m.content}</div>)}
-              {busy && <div className="ob-assistant typing"><span /><span /><span /></div>}
-              <div ref={endRef} />
-            </div>
-            <form onSubmit={ask}><input value={text} onChange={e => setText(e.target.value)} placeholder={`Talk to ${B.name}…`} maxLength={500} /><button className="btn primary sm" disabled={busy || !text.trim()}>Send</button></form>
+          <motion.div key="play" className="orbi-play-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .2 }} onClick={e => { if (e.target === e.currentTarget) setOpen(false); }}>
+            <motion.div className="orbi-play" role="dialog" aria-label={`Play with ${B.name}`} initial={{ opacity: 0, y: 24, scale: .94 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: .96 }} transition={{ type: 'spring', stiffness: 320, damping: 28 }}>
+              <div className="orbi-head"><b>{B.name}{god ? ' 👑' : ''}</b><span>{god ? 'god mode' : B.tag}</span><button onClick={() => setPick(p => !p)} aria-label="Change buddy" title="Change buddy">⇄</button><button onClick={() => setOpen(false)} aria-label="Close">×</button></div>
+              {pick && <div className="orbi-pick">{BUDDY_IDS.map(id => <button key={id} className={id === buddy ? 'on' : ''} onClick={() => choose(id)} aria-label={BUDDIES[id].name}><Face mood="idle" buddy={id} uid="pk" /><small>{BUDDIES[id].name}</small></button>)}</div>}
+              <div className="orbi-stage">
+                <div className="orbi-say" aria-live="polite">{say || (log.length ? '' : B.hi)}</div>
+                <button type="button" className={`orbi-big${dance ? ' dance' : ''}`} onPointerDown={() => { clearTimeout(press.current); press.current = setTimeout(() => { held.current = true; hug(); }, 600); }} onPointerUp={() => { clearTimeout(press.current); if (held.current) { held.current = false; return; } playTap(); }} onPointerLeave={() => clearTimeout(press.current)} onContextMenu={e => e.preventDefault()} aria-label={`Poke ${B.name}`}>
+                  <Face mood={mood} buddy={buddy} god={god} uid="play" />
+                  {mood === 'love' && <span key={hearts} className="hearts" aria-hidden="true"><i>💜</i><i>💗</i><i>💜</i></span>}
+                </button>
+              </div>
+              <div className="orbi-acts">
+                <button onClick={playTap}>👆 Poke</button><button onClick={hug}>💜 Hug</button><button onClick={() => react('happy', 'Yum! 🍪 Thanks!', 3000)}>🍪 Feed</button><button onClick={() => { setDance(true); react('happy', '💃🎶', 2600); setTimeout(() => setDance(false), 2600); }}>💃 Dance</button><button onClick={() => react('sleepy', 'zzz…', 4000)}>😴 Sleep</button>
+              </div>
+              <div className="orbi-log">
+                {log.slice(-6).map((m, i) => <div key={i} className={`ob-${m.role}`}>{m.content}</div>)}
+                {busy && <div className="ob-assistant typing"><span /><span /><span /></div>}
+                <div ref={endRef} />
+              </div>
+              <form onSubmit={ask}><input value={text} onChange={e => setText(e.target.value)} placeholder={`Talk to ${B.name}…`} maxLength={500} /><button className="btn primary sm" disabled={busy || !text.trim()}>Send</button></form>
+            </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>, document.body)}
       <AnimatePresence>
         {say && !open && <motion.div key={say} className="orbi-bubble" initial={{ opacity: 0, y: 8, scale: .92 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }}>{say}</motion.div>}
       </AnimatePresence>
@@ -172,4 +186,4 @@ export default function Mascot({ canChat, hidden, user }) {
       </button>
     </div>
   );
-            }
+}
