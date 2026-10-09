@@ -1,7 +1,7 @@
 const URL_ = 'https://api.groq.com/openai/v1/chat/completions';
 export const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 // Groq's free tier allows ~8000 tokens per request (input + max output). Keep every request under budget.
-const OUT_TOKENS = 1400;
+const OUT_TOKENS = 2400;
 const IN_BUDGET = Number(process.env.LLM_INPUT_BUDGET || 5600);
 export const estTokens = o => Math.ceil(JSON.stringify(o).length / 3.3);
 
@@ -50,6 +50,7 @@ export async function chatCompletion({ messages, tools }) {
   for (let attempt = 0; attempt < 6; attempt++) {
     const f = fit(messages, tools, budget);
     const body = { model: MODELS[Math.min(MODELS.length - 1, Math.floor(attempt / 2))], messages: f.messages, temperature: 0.3, max_tokens: OUT_TOKENS };
+    if (/gpt-oss/.test(body.model)) body.reasoning_effort = 'low';
     if (f.tools?.length) { body.tools = f.tools; body.tool_choice = 'auto'; }
     const r = await fetch(URL_, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` }, body: JSON.stringify(body), signal: AbortSignal.timeout(90000) });
     const j = await r.json().catch(() => ({}));
