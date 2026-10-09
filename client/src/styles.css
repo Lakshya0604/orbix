@@ -287,3 +287,4 @@ input:focus,textarea:focus{border-color:var(--v);box-shadow:0 0 0 4px rgba(109,5
 .orbi-play .orbi-log{flex:1 1 auto;min-height:60px;max-height:160px;overflow:auto}.orbi-play form{flex:none;display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}.orbi-play input{flex:1;min-width:0;padding:8px 12px}
 .hf-out{white-space:pre-wrap;word-break:break-word;margin:10px 0 0;padding:10px 12px;border-radius:12px;background:var(--bg-soft,rgba(124,92,255,.08));font:13px/1.5 ui-monospace,monospace;max-height:320px;overflow:auto}
 .orbi-play{box-sizing:border-box;width:min(420px,calc(100vw - 28px))}.orbi-play-wrap{box-sizing:border-box}
+.sp-f{display:flex;flex-direction:column;gap:3px;margin:6px 0;font-size:13px}.sp-f input[type=checkbox]{width:auto}
