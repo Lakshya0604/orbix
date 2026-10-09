@@ -36,5 +36,5 @@ function Inner({ setUserOut }) {
 export default function App() {
   const [u, setU] = useState(null);
   const shared = location.hash.startsWith('#/s/');
-  return <><Inner setUserOut={setU} /><Mascot canChat={!!u} hidden={shared} /></>;
+  return <><Inner setUserOut={setU} /><Mascot canChat={!!u} hidden={shared} user={u} /></>;
 }
