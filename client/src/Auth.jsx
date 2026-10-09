@@ -15,7 +15,7 @@ export default function Auth({ mode, q, dark, setDark, onDone }) {
   const [err, setErr] = useState(q.get('error') ? 'Sign-in did not finish. Try again.' : ''); const [info, setInfo] = useState(''); const [busy, setBusy] = useState(false);
   const [cfg, setCfg] = useState({ google: false, github: false });
   useEffect(() => { let on = true, n = 0; const go = () => api('/api/config').then(c => on && setCfg(c)).catch(() => { if (on && ++n < 6) setTimeout(go, 2500); }); go(); return () => { on = false; }; }, []);
-  useEffect(() => { setErr(''); setInfo(''); orbi('wave', { login: 'Welcome back! Sign in, or try the demo from the home page.', signup: 'Nice, let us set you up. Use 8+ characters for the password.', forgot: 'No stress. Enter your email and I will send a link.', reset: 'Pick a strong new password.' }[mode], 5000); }, [mode]);
+  useEffect(() => { setErr(''); setInfo(''); orbi('wave', { login: 'Welcome back! Sign in to continue.', signup: 'Nice, let us set you up. Use 8+ characters for the password.', forgot: 'No stress. Enter your email and I will send a link.', reset: 'Pick a strong new password.' }[mode], 5000); }, [mode]);
   useEffect(() => { if (mode === 'signup' && password && password.length < 8) orbi('worried', 'Password needs at least 8 characters.', 2500); }, [password, mode]);
   async function submit(e) {
     e.preventDefault(); setErr(''); setInfo(''); setBusy(true);
