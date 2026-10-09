@@ -23,7 +23,7 @@ app.set('trust proxy', 1);
 const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? null : 'dev-secret');
 if (!JWT_SECRET) throw new Error('JWT_SECRET is required');
 const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
-const sign = u => jwt.sign({ sub: String(u._id) }, JWT_SECRET, { expiresIn: u.isGuest ? '1d' : '14d' });
+const sign = u => jwt.sign({ sub: String(u._id) }, JWT_SECRET, { algorithm: 'HS256', expiresIn: u.isGuest ? '1d' : '14d' });
 const GUEST_LIMIT = Number(process.env.GUEST_TASKS || 3);
 const publicUser = u => ({ id: String(u._id), email: u.email || null, guest: !!u.isGuest, guestLeft: u.isGuest ? Math.max(0, GUEST_LIMIT - (u.guestUses || 0)) : null, name: u.isGuest ? 'Guest' : (u.name || u.email.split('@')[0]) });
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(e => { console.error(e.message); res.status(e.status || 500).json({ error: e.status ? e.message : 'Something went wrong' }); });
@@ -32,11 +32,14 @@ const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'], fontSrc: ["'self'", 'https://fonts.gstatic.com'], imgSrc: ["'self'", 'data:', 'https:'], mediaSrc: ["'self'", 'https:'], connectSrc: ["'self'"] } }, crossOriginEmbedderPolicy: false }));
 app.use(cors({ origin: APP_URL || true }));
 app.use(express.json({ limit: '200kb' }));
+const stripOps = o => { if (o && typeof o === 'object') for (const k of Object.keys(o)) { if (k.startsWith('$') || k.includes('.')) delete o[k]; else stripOps(o[k]); } return o; };
+app.use((q, _r, n) => { if (q.body) stripOps(q.body); if (q.query) stripOps(q.query); n(); }); // block NoSQL operator injection
+app.use('/api', rateLimit({ windowMs: 60 * 1000, limit: 240, standardHeaders: true, legacyHeaders: false, skip: q => q.path === '/health' || q.path === '/events' }));
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 40, standardHeaders: true, legacyHeaders: false });
 
 const auth = wrap(async (req, res, next) => {
   const h = req.headers.authorization || '';
-  try { const p = jwt.verify(h.replace(/^Bearer /, ''), JWT_SECRET); const u = await User.findById(p.sub); if (!u) throw 0; req.user = u; next(); }
+  try { const p = jwt.verify(h.replace(/^Bearer /, ''), JWT_SECRET, { algorithms: ['HS256'] }); const u = await User.findById(p.sub); if (!u) throw 0; req.user = u; next(); }
   catch { res.status(401).json({ error: 'Please sign in again.' }); }
 });
 
@@ -48,7 +51,7 @@ const emailOk = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e || '');
 app.post('/api/auth/signup', authLimiter, wrap(async (q, r) => {
   const { email, password, name } = q.body || {};
   if (!emailOk(email)) throw bad('Enter a valid email.');
-  if (!password || password.length < 8) throw bad('Password must be at least 8 characters.');
+  if (typeof password !== 'string' || password.length < 8 || password.length > 128 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) throw bad('Password needs 8 to 128 characters with at least one letter and one number.');
   if (await User.findOne({ email: email.toLowerCase() })) throw bad('An account with this email already exists. Sign in instead.', 409);
   const u = await User.create({ email, name: String(name || '').slice(0, 60), passwordHash: await bcrypt.hash(password, 11) });
   r.status(201).json({ token: sign(u), user: publicUser(u) });
@@ -73,7 +76,7 @@ app.post('/api/auth/forgot', authLimiter, wrap(async (q, r) => {
 }));
 app.post('/api/auth/reset', authLimiter, wrap(async (q, r) => {
   const { token, password } = q.body || {};
-  if (!password || password.length < 8) throw bad('Password must be at least 8 characters.');
+  if (typeof password !== 'string' || password.length < 8 || password.length > 128 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) throw bad('Password needs 8 to 128 characters with at least one letter and one number.');
   const u = await User.findOne({ resetHash: crypto.createHash('sha256').update(String(token || '')).digest('hex'), resetExpires: { $gt: new Date() } });
   if (!u) throw bad('This reset link is invalid or has expired.');
   u.passwordHash = await bcrypt.hash(password, 11); u.resetHash = undefined; u.resetExpires = undefined; await u.save();
