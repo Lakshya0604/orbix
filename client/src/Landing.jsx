@@ -31,10 +31,10 @@ export default function Landing({ dark, setDark, onGuest, busy, err }) {
           <motion.h1 {...rise(1)}>Every MCP server.<br /><span className="grad">One conversation.</span></motion.h1>
           <motion.p {...rise(2)}>Connect free MCP servers, watch each one live, and ask for anything. Orbix chains the right tools and hands you the result to download.</motion.p>
           <motion.div className="cta" {...rise(3)}>
-            <button className="btn primary big-cta" onClick={onGuest} disabled={busy}>{busy ? 'Starting…' : 'Try the live demo'} <span>→</span></button>
+            <a className="btn primary big-cta" href="#/signup">Create free account <span>→</span></a>
             <a className="btn ghost big-cta" href="#/signup">Create free account</a>
           </motion.div>
-          <p className="fine">No sign-up needed for the demo. 3 free tasks.</p>
+          <p className="fine">Free to use. Sign up takes a few seconds.</p>
           {err && <div className="msg err">{err}</div>}
         </div>
         <motion.div className="lart" initial={{ opacity: 0, scale: .9 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 1, ease: [.22, 1, .36, 1] }}>
@@ -49,8 +49,8 @@ export default function Landing({ dark, setDark, onGuest, busy, err }) {
         {FEATURES.map(([n, t, d], i) => <motion.div key={n} {...rise(i)}><Tilt className="feat"><span className="num">{n}</span><h3>{t}</h3><p>{d}</p></Tilt></motion.div>)}
       </section>
       <motion.section className="closing" {...rise(0)}>
-        <h2>See it work before you sign up.</h2>
-        <button className="btn primary big-cta" onClick={onGuest} disabled={busy}>Try the live demo →</button>
+        <h2>Connect your first MCP server in a minute.</h2>
+        <a className="btn primary big-cta" href="#/signup">Create free account →</a>
       </motion.section>
       <footer className="lfoot">Orbix · built by Lakshya Yadav · <a href="https://github.com/Lakshya0604/orbix" target="_blank" rel="noreferrer noopener">source on GitHub</a></footer>
     </div>
