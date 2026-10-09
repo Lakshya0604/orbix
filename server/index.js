@@ -318,7 +318,7 @@ let vsHealth = { at: 0 };
 app.get('/api/health/vision', healthLimiter, wrap(async (q, r) => {
   if (Date.now() - vsHealth.at < 300000) return r.json(vsHealth.v);
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAb0lEQVR4nO3PAQkAAAyEwO9feoshgnABdLep8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3IPanc8OLDQitxAAAAAElFTkSuQmCC';
-  let v; try { const t = Date.now(); const s = await visionDescribe([png], 'What color is this image? One word.'); v = { ok: true, ms: Date.now() - t, sample: s.slice(0, 80) }; } catch (e) { v = { ok: false, error: e.message.slice(0, 300) }; }
+  let v; try { const t = Date.now(); const s = await visionDescribe([png], 'What color is this image? One word.'); v = { ok: true, ms: Date.now() - t, sample: s.slice(0, 80) }; } catch (e) { v = { ok: false, error: e.message.slice(0, 700) }; }
   vsHealth = { at: Date.now(), v }; r.json(v);
 }));
 // image feature self-check (no secrets in the answer), cached 10 minutes
