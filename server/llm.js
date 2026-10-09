@@ -15,7 +15,7 @@ function slimSchema(n) { // drop long parameter descriptions and examples, keep 
 }
 function rankTools(tools, text) {
   const q = words(text);
-  return tools.map((t, i) => { const w = words(`${t.function.name.replace(/_/g, ' ')} ${t.function.description}`); let s = 0; for (const x of q) if (w.has(x)) s++; return { t, s, i }; }).sort((a, b) => b.s - a.s || a.i - b.i);
+  return tools.map((t, i) => { const w = words(`${t.function.name.replace(/_/g, ' ')} ${t.function.description}`); let s = t.function.name.startsWith('orbix__') ? 100 : 0; for (const x of q) if (w.has(x)) s++; return { t, s, i }; }).sort((a, b) => b.s - a.s || a.i - b.i);
 }
 export function fit(messages, tools, budget = IN_BUDGET) {
   let msgs = messages.map(m => ({ ...m })); let defs = tools || [];
