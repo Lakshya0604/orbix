@@ -29,7 +29,7 @@ export async function startJob(userId, topic, long = false) {
 }
 
 const ARC = 'The scenes must be ONE connected story with a clear arc: a hook/intro that sets the character and place, a buildup that raises the stakes, a turn or twist, a climax, and a closing ending that pays off the start. Each scene continues directly from the previous one (same characters, same place, cause and effect), never a list of unrelated facts.';
-const jsonOf = t => { try { return JSON.parse(String(t || '').match(/\{[\s\S]*\}/)?.[0] || ''); } catch { return null; } };
+const jsonOf = t => { const m = String(t || '').match(/\{[\s\S]*\}/)?.[0] || ''; for (const v of [m, m.replace(/,\s*([}\]])/g, '$1'), m.replace(/[\u201c\u201d]/g, "'").replace(/,\s*([}\]])/g, '$1')]) { try { return JSON.parse(v); } catch {} } return null; };
 async function script(job) {
   const N = job.long ? LONG_SCENES : SCENES; let outline = '';
   if (job.long) {
@@ -44,10 +44,10 @@ async function script(job) {
     const plan = [['intro', 3], ['buildup', 3], ['twist', 2], ['climax', 3], ['ending', 3]]; const acc = [];
     for (const [act, n] of plan) {
       let got = null;
-      for (let t = 0; t < 3 && !got; t++) {
+      for (let t = 0; t < 5 && !got; t++) {
         job.stage = `Writing the story: ${act}`; await job.save().catch(() => {});
         const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: sysFor(n, `\nStory plan:\n${outline}\nWrite ONLY the "${act}" part now: exactly ${n} scenes, all with act "${act}".${acc.length ? `\nNarration so far (continue straight from it):\n${acc.map(x => x.say).join(' ')}` : ''}`) }, { role: 'user', content: `Topic: ${job.topic}` }] });
-        const x = jsonOf(m.content); if (x && Array.isArray(x.scenes) && x.scenes.length >= 2) got = x.scenes.slice(0, n);
+        const x = jsonOf(m.content); if (x && Array.isArray(x.scenes) && x.scenes.length >= 1) got = x.scenes.slice(0, n);
       }
       if (!got) throw new Error('The script came back broken. Try again.');
       got.forEach(x => { if (x && typeof x === 'object') x.act = act; }); acc.push(...got);
