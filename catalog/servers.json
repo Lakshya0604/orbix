@@ -1,0 +1,214 @@
+{
+  "updatedAt": "2026-10-09T05:02:16.672Z",
+  "servers": [
+    {
+      "id": "deepwiki",
+      "name": "DeepWiki",
+      "url": "https://mcp.deepwiki.com/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "docs",
+        "code",
+        "github"
+      ],
+      "description": "Ask questions about any public GitHub repo and read its generated wiki.",
+      "toolCount": 3,
+      "sampleTools": [
+        "ask_wiki_question",
+        "read_wiki_contents",
+        "read_wiki_structure"
+      ],
+      "smoke": "passed",
+      "testedAt": "2026-10-09",
+      "status": "verified",
+      "examples": [
+        "Explain the architecture of the facebook/react repo",
+        "How does routing work in vercel/next.js?"
+      ]
+    },
+    {
+      "id": "context7",
+      "name": "Context7",
+      "url": "https://mcp.context7.com/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "docs",
+        "code"
+      ],
+      "description": "Up-to-date documentation and code examples for libraries and frameworks.",
+      "toolCount": 2,
+      "sampleTools": [
+        "resolve-library-id",
+        "query-docs"
+      ],
+      "smoke": "passed",
+      "testedAt": "2026-10-09",
+      "status": "verified",
+      "examples": [
+        "Show current docs for the Express rate limit middleware",
+        "How do I use useOptimistic in React 19?"
+      ]
+    },
+    {
+      "id": "exa",
+      "name": "Exa Search",
+      "url": "https://mcp.exa.ai/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "search",
+        "web"
+      ],
+      "description": "Fast web search and page fetch for current information (free tier, rate limited).",
+      "toolCount": 2,
+      "sampleTools": [
+        "web_search_exa",
+        "web_fetch_exa"
+      ],
+      "smoke": "passed",
+      "testedAt": "2026-10-09",
+      "status": "verified",
+      "examples": [
+        "Find the best recent articles on the Model Context Protocol",
+        "Search for open source alternatives to Notion"
+      ]
+    },
+    {
+      "id": "gitmcp",
+      "name": "GitMCP Docs",
+      "url": "https://gitmcp.io/docs",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "docs",
+        "code",
+        "github"
+      ],
+      "description": "Search documentation and code of any GitHub project by name.",
+      "toolCount": 5,
+      "sampleTools": [
+        "match_common_libs_owner_repo_mapping",
+        "fetch_generic_documentation",
+        "search_generic_documentation",
+        "search_generic_code",
+        "fetch_generic_url_content"
+      ],
+      "smoke": "skipped",
+      "testedAt": "2026-10-09",
+      "status": "verified",
+      "examples": [
+        "Summarise the modelcontextprotocol/servers repo",
+        "List the main folders of the langchain-ai/langchain repo"
+      ]
+    },
+    {
+      "id": "huggingface",
+      "name": "Hugging Face",
+      "url": "https://huggingface.co/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "ai",
+        "models",
+        "search"
+      ],
+      "description": "Search models, datasets, Spaces and papers on the Hugging Face Hub.",
+      "toolCount": 4,
+      "sampleTools": [
+        "hf_whoami",
+        "hub_repo_search",
+        "hub_repo_details",
+        "hf_fs"
+      ],
+      "smoke": "passed",
+      "testedAt": "2026-10-09",
+      "status": "verified",
+      "examples": [
+        "Find popular open text-to-image models on Hugging Face",
+        "Search Hugging Face docs for how to fine-tune with LoRA"
+      ]
+    },
+    {
+      "id": "cloudflare-docs",
+      "name": "Cloudflare Docs",
+      "url": "https://docs.mcp.cloudflare.com/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "docs",
+        "cloud"
+      ],
+      "description": "Search the Cloudflare developer documentation.",
+      "toolCount": 2,
+      "sampleTools": [
+        "search_cloudflare_documentation",
+        "migrate_pages_to_workers_guide"
+      ],
+      "smoke": "passed",
+      "testedAt": "2026-10-09",
+      "status": "verified",
+      "examples": [
+        "How do Cloudflare Workers KV limits work?",
+        "Show how to set up a Pages project"
+      ]
+    },
+    {
+      "id": "coingecko",
+      "name": "CoinGecko",
+      "url": "https://mcp.api.coingecko.com/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "finance",
+        "crypto",
+        "data"
+      ],
+      "description": "Crypto prices and market data (public rate-limited endpoint).",
+      "toolCount": 2,
+      "sampleTools": [
+        "execute",
+        "search_docs"
+      ],
+      "smoke": "passed",
+      "testedAt": "2026-10-09",
+      "status": "verified",
+      "examples": [
+        "What are the current prices of bitcoin and ethereum?",
+        "Show the top 5 trending coins today"
+      ]
+    },
+    {
+      "id": "ltx-video",
+      "name": "LTX Video (text to video)",
+      "url": "https://lightricks-ltx-video-distilled.hf.space/gradio_api/mcp/",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "video",
+        "media",
+        "free-gpu"
+      ],
+      "description": "Generate short videos from a text prompt on a free shared GPU. Clips are short and may queue when busy.",
+      "toolCount": 7,
+      "sampleTools": [
+        "ltx_video_distilled_handle_image_upload_for_dims",
+        "ltx_video_distilled_handle_video_upload_for_dims",
+        "ltx_video_distilled_update_task_image",
+        "ltx_video_distilled_update_task_text",
+        "ltx_video_distilled_generate",
+        "ltx_video_distilled_generate_1",
+        "ltx_video_distilled_generate_2"
+      ],
+      "smoke": "passed",
+      "testedAt": "2026-10-09",
+      "status": "verified",
+      "examples": [
+        "Make a 2 second video of a red balloon floating over a lake at sunrise",
+        "Generate a short video of rain on a neon city street"
+      ]
+    }
+  ],
+  "rejected": []
+}
