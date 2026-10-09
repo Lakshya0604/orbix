@@ -161,3 +161,4 @@ input:focus,textarea:focus{border-color:var(--v);box-shadow:0 0 0 4px rgba(109,5
 .ob-user{align-self:flex-end;background:var(--v);color:#fff;padding:8px 12px;border-radius:14px 14px 4px 14px;max-width:85%}.ob-assistant{align-self:flex-start;background:var(--bg2);padding:8px 12px;border-radius:14px 14px 14px 4px;max-width:90%}
 .orbi-panel form{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}.orbi-panel input{padding:8px 12px}
 @media(max-width:820px){.orbi{bottom:84px}.orbi-btn{width:64px;height:64px}}
+@media(max-width:820px){.topbar{gap:8px;padding:8px 10px}.live-pill{white-space:nowrap;padding:5px 10px}.topbar .chip.accent{display:none}.topbar .chip{white-space:nowrap}.brand{font-size:19px}}
