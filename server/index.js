@@ -10,7 +10,7 @@ import zlib from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { User, Server, Chat, Visit } from './models.js';
+import { User, Server, Chat, Visit, AuthEvent } from './models.js';
 import { encrypt } from './crypto.js';
 import { sendMail } from './mail.js';
 import { assertPublicUrl } from './ssrf.js';
@@ -40,7 +40,7 @@ const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 40, standardHea
 
 const auth = wrap(async (req, res, next) => {
   const h = req.headers.authorization || '';
-  try { const p = jwt.verify(h.replace(/^Bearer /, ''), JWT_SECRET, { algorithms: ['HS256'] }); const u = await User.findById(p.sub); if (!u) throw 0; req.user = u; req.tokenIat = p.iat; next(); }
+  try { const p = jwt.verify(h.replace(/^Bearer /, ''), JWT_SECRET, { algorithms: ['HS256'] }); const u = await User.findById(p.sub); if (!u || u.isGuest) throw 0; req.user = u; req.tokenIat = p.iat; next(); }
   catch { res.status(401).json({ error: 'Please sign in again.' }); }
 });
 
@@ -48,6 +48,7 @@ app.get('/api/health', (_q, r) => r.json({ ok: true, db: mongoose.connection.rea
 app.get('/api/config', (_q, r) => r.json({ google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET), github: !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET), model: !!process.env.GROQ_API_KEY }));
 
 // ---------- auth ----------
+const logEv = (u, type, how) => AuthEvent.create({ email: u.email || '', type, how }).catch(() => {});
 const emailOk = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e || '');
 app.post('/api/auth/signup', authLimiter, wrap(async (q, r) => {
   const { email, password, name } = q.body || {};
@@ -55,12 +56,14 @@ app.post('/api/auth/signup', authLimiter, wrap(async (q, r) => {
   if (typeof password !== 'string' || password.length < 8 || password.length > 128 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) throw bad('Password needs 8 to 128 characters with at least one letter and one number.');
   if (await User.findOne({ email: email.toLowerCase() })) throw bad('An account with this email already exists. Sign in instead.', 409);
   const u = await User.create({ email, name: String(name || '').slice(0, 60), passwordHash: await bcrypt.hash(password, 11) });
+  logEv(u, 'signup', 'password');
   r.status(201).json({ token: sign(u), user: publicUser(u) });
 }));
 app.post('/api/auth/login', authLimiter, wrap(async (q, r) => {
   const { email, password } = q.body || {};
   const u = await User.findOne({ email: String(email || '').toLowerCase() });
   if (!u?.passwordHash || !(await bcrypt.compare(String(password || ''), u.passwordHash))) throw bad('Wrong email or password.', 401);
+  logEv(u, 'login', 'password');
   r.json({ token: sign(u), user: publicUser(u) });
 }));
 // sliding session: a token older than 7 days is swapped for a fresh 90-day one, so active users stay signed in
@@ -79,6 +82,12 @@ app.post('/api/track', trackLimiter, wrap(async (q, r) => {
   r.json({ ok: true });
 }));
 const admins = () => (process.env.ADMIN_EMAILS || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
+const authStats = async since => {
+  const ev = await AuthEvent.find({ at: { $gte: new Date(Date.now() - 30 * 86400000) } }).sort('-at').limit(500).lean();
+  const byDay = {}; for (const e of ev) { const d = dayOf(e.at); (byDay[d] ||= { signups: 0, logins: 0 })[e.type === 'signup' ? 'signups' : 'logins']++; }
+  const days = Array.from({ length: 30 }, (_, i) => dayOf(new Date(Date.now() - (29 - i) * 86400000))).map(d => ({ day: d, signups: byDay[d]?.signups || 0, logins: byDay[d]?.logins || 0 }));
+  return { signups30d: ev.filter(e => e.type === 'signup').length, logins30d: ev.filter(e => e.type === 'login').length, days, recent: ev.slice(0, 30).map(e => ({ email: e.email, type: e.type, how: e.how, at: e.at })) };
+};
 app.get('/api/stats', auth, wrap(async (q, r) => {
   if (q.user.isGuest || !admins().includes(String(q.user.email || '').toLowerCase())) throw bad('Not allowed.', 403);
   const since = dayOf(new Date(Date.now() - 29 * 86400000));
@@ -87,7 +96,7 @@ app.get('/api/stats', auth, wrap(async (q, r) => {
   const today = dayOf(), byDay = {};
   for (const x of rows) { (byDay[x.day] ||= []).push(x.vid); }
   const days = Array.from({ length: 30 }, (_, i) => dayOf(new Date(Date.now() - (29 - i) * 86400000))).map(d => ({ day: d, views: (byDay[d] || []).length, visitors: uniq(byDay[d] || []) }));
-  r.json({ totalViews: rows.length, visitors30d: uniq(rows.map(x => x.vid + x.day)), todayViews: (byDay[today] || []).length, todayVisitors: uniq(byDay[today] || []), days, pages: tally(x => x.path), referrers: tally(x => x.ref), devices: tally(x => x.device, 3), users: await User.countDocuments({ isGuest: false }) });
+  r.json({ totalViews: rows.length, visitors30d: uniq(rows.map(x => x.vid + x.day)), todayViews: (byDay[today] || []).length, todayVisitors: uniq(byDay[today] || []), days, pages: tally(x => x.path), referrers: tally(x => x.ref), devices: tally(x => x.device, 3), users: await User.countDocuments({ isGuest: false }), auth: await authStats(since) });
 }));
 app.post('/api/auth/forgot', authLimiter, wrap(async (q, r) => {
   const email = String(q.body?.email || '').toLowerCase();
@@ -135,7 +144,7 @@ app.get('/api/auth/github/callback', wrap(async (q, r) => {
   const em = Array.isArray(emails) ? (emails.find(e => e.primary && e.verified) || emails.find(e => e.verified)) : null;
   if (!me?.id || !em?.email) return fail();
   let u = await User.findOne({ $or: [{ githubId: String(me.id) }, { email: em.email.toLowerCase() }] });
-  if (!u) u = await User.create({ email: em.email, name: me.name || me.login || '', githubId: String(me.id) });
+  const isNew = !u; if (!u) u = await User.create({ email: em.email, name: me.name || me.login || '', githubId: String(me.id) });
   else if (!u.githubId) { u.githubId = String(me.id); await u.save(); }
   r.redirect(`/#/auth?token=${encodeURIComponent(sign(u))}`);
 }));
@@ -155,8 +164,9 @@ app.get('/api/auth/google/callback', wrap(async (q, r) => {
   const info = await (await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tj.id_token)}`)).json();
   if (info.aud !== process.env.GOOGLE_CLIENT_ID || info.email_verified !== 'true' || !info.email) return r.redirect('/#/login?error=google');
   let u = await User.findOne({ $or: [{ googleId: info.sub }, { email: info.email.toLowerCase() }] });
-  if (!u) u = await User.create({ email: info.email, name: info.name || '', googleId: info.sub });
+  const isNew = !u; if (!u) u = await User.create({ email: info.email, name: info.name || '', googleId: info.sub });
   else if (!u.googleId) { u.googleId = info.sub; await u.save(); }
+  logEv(u, isNew ? 'signup' : 'login', 'google');
   r.redirect(`/#/auth?token=${encodeURIComponent(sign(u))}`);
 }));
 
@@ -184,15 +194,7 @@ app.get('/api/download', auth, wrap(async (q, r) => {
 }));
 
 // ---------- guest demo ----------
-const guestLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 6, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many demo sessions from this network. Please create an account.' } });
-app.post('/api/auth/guest', guestLimiter, wrap(async (q, r) => {
-  const u = await User.create({ isGuest: true, name: 'Guest' });
-  for (const c of readCatalog().servers.filter(c => c.auth === 'none')) {
-    const s = await Server.create({ userId: u._id, name: c.name, slug: slugify(c.name), url: c.url, transport: c.transport, catalogId: c.id });
-    mcp.connect(u._id, s);
-  }
-  r.status(201).json({ token: sign(u), user: publicUser(u) });
-}));
+app.post('/api/auth/guest', (_q, r) => r.status(410).json({ error: 'The demo has ended. Create a free account to use Orbix.' }));
 // guests live 24h; clean up their data hourly
 async function cleanGuests() {
   const old = await User.find({ isGuest: true, createdAt: { $lt: new Date(Date.now() - 24 * 3600 * 1000) } }).select('_id');
