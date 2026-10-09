@@ -322,4 +322,4 @@ export default function Hub({ user, dark, setDark, logout }) {
       <AnimatePresence>{toast && <motion.div className="toast" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
     </div>
   );
-                }
+}
