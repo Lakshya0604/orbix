@@ -104,7 +104,8 @@ async function stockClip(job, i) {
   } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
 const NOTE = { agnes: 'Free AI-video GPU was used up today, so this one uses Agnes AI video', stock: 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)', still: 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion' };
-const fallbackMode = () => process.env.AGNES_API_KEY ? 'agnes' : process.env.PIXABAY_KEY ? 'stock' : 'still';
+let agnesOffUntil = 0;
+const fallbackMode = () => process.env.AGNES_API_KEY && Date.now() > agnesOffUntil ? 'agnes' : process.env.PIXABAY_KEY ? 'stock' : 'still';
 let agnesAt = 0;
 let gpuDownAt = 0; // last time the free GPU quota failed; skip the slow AI attempt for 30 min after
 async function step(job) {
@@ -134,7 +135,7 @@ async function step(job) {
           const r = await fetch(out.url, { signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Could not download the Agnes clip.');
           data = Buffer.from(await r.arrayBuffer()); job.note = `${NOTE.agnes} (${out.size || '?'}, ${Math.round((Date.now() - t0) / 1000)}s/clip)`;
         } catch (e) {
-          console.error('agnes', e.message.slice(0, 160));
+          console.error('agnes', e.message.slice(0, 160)); if (/model_not_found|No available channel|HTTP 40[13]/.test(e.message)) agnesOffUntil = Date.now() + 6 * 3600000;
           if (!process.env.PIXABAY_KEY) throw e;
           data = await stockClip(job, i); job.note = `${NOTE.agnes} + Pixabay stock for some scenes (${e.message.slice(0, 60)})`;
         }
