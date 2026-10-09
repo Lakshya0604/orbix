@@ -41,7 +41,7 @@ export default function Hub({ user, dark, setDark, logout }) {
   const [servers, setServers] = useState([]);
   const [catalog, setCatalog] = useState({ servers: [], rejected: [] });
   const [health, setHealth] = useState({});
-  const [chats, setChats] = useState([]); const [docs, setDocs] = useState([]); const [upBusy, setUpBusy] = useState(false);
+  const [chats, setChats] = useState([]); const [docs, setDocs] = useState([]); const [upBusy, setUpBusy] = useState(false); const [attach, setAttach] = useState(false);
   const [chatId, setChatId] = useState(null);
   const [msgs, setMsgs] = useState([]);
   const [live, setLive] = useState(null); // {steps, status}
@@ -74,6 +74,7 @@ export default function Hub({ user, dark, setDark, logout }) {
     try { const r = await fetch(`/api/docs?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token()}` }, body: f }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Upload failed'); say(`${j.name} added (${j.chunks} parts)`); loadDocs(); } catch (x) { say(x.message); }
     setUpBusy(false);
   };
+  const soon = what => { setAttach(false); say(`${what} understanding is coming in the next update. Documents work now.`); };
   const removeDoc = async id => { await api(`/api/docs/${id}`, { method: 'DELETE' }); loadDocs(); };
   const loadChats = useCallback(async () => setChats(await api('/api/chats')), []);
   useEffect(() => { loadServers(); loadChats(); loadDocs(); api('/api/catalog').then(setCatalog); api('/api/servers/reconnect-all', { method: 'POST' }).catch(() => {}); }, [loadServers, loadChats, loadDocs]);
@@ -217,6 +218,14 @@ export default function Hub({ user, dark, setDark, logout }) {
             <div ref={bottom} />
           </div>
           <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
+            <div className="attach">
+              <button type="button" className="attach-btn" aria-label="Attach" aria-expanded={attach} disabled={upBusy} onClick={() => setAttach(a => !a)}>{upBusy ? '…' : '+'}</button>
+              {attach && <><div className="attach-scrim" onClick={() => setAttach(false)} /><div className="attach-menu" role="menu">
+                <label role="menuitem"><span>📄</span><b>Document</b><small>PDF, DOCX, TXT, CSV</small><input type="file" hidden accept=".pdf,.docx,.txt,.md,.csv,.json,.html,.log" onChange={e => { setAttach(false); upload(e); }} /></label>
+                <button type="button" role="menuitem" onClick={() => soon('Photo')}><span>🖼</span><b>Photo</b><small>coming soon</small></button>
+                <button type="button" role="menuitem" onClick={() => soon('Video')}><span>🎬</span><b>Video</b><small>coming soon</small></button>
+              </div></>}
+            </div>
             <textarea rows={1} value={text} onChange={e => setText(e.target.value)} placeholder="Ask for anything your servers can do…" onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
             {busy ? <button type="button" className="btn ghost" onClick={() => abort.current?.abort()}>Stop</button> : <button className="btn primary" disabled={!text.trim()}>Send</button>}
           </form>
