@@ -82,7 +82,7 @@ async function stillClip(prompt, i) {
 // Stock fallback (free Pixabay API key): real stock footage for the scene keywords, cropped to 9:16 and trimmed to 4.5 s.
 async function stockClip(job, i) {
   const key = process.env.PIXABAY_KEY; if (!key) throw new Error('No stock key set.');
-  const sc = job.scenes[i]; const base = String(sc.kw || sc.prompt).split(/\s+/).slice(0, 4).join(' ');
+  const sc = job.scenes[i]; const mark = async t => { job.note = `stock ${i}: ${t}`; await job.save().catch(() => {}); }; await mark('search'); const base = String(sc.kw || sc.prompt).split(/\s+/).slice(0, 4).join(' ');
   let hit = null;
   for (const q of [base, base.split(' ').slice(0, 2).join(' '), String(job.topic).split(/\s+/).slice(0, 3).join(' '), 'nature']) {
     const r = await fetch(`https://pixabay.com/api/videos/?key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}&per_page=20&safesearch=true`, { signal: AbortSignal.timeout(20000) });
@@ -90,34 +90,37 @@ async function stockClip(job, i) {
     const hits = ((await r.json()).hits || []).filter(h => (h.duration || 0) >= 3 && h.videos?.medium?.url);
     if (hits.length) { hit = hits[(i * 3 + Date.now()) % Math.min(hits.length, 8)]; break; }
   }
-  if (!hit) throw new Error('No stock footage found for this topic.');
+  await mark('download'); if (!hit) throw new Error('No stock footage found for this topic.');
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-s-'));
   try {
-    const r = await fetch(hit.videos.medium.url, { signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Could not download stock footage.');
-    const src = path.join(dir, 's.mp4'), out = path.join(dir, 'o.mp4'); await fs.writeFile(src, Buffer.from(await r.arrayBuffer()));
-    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', src, '-t', '4.5', '-an', '-vf', `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=24,format=yuv420p`, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26', '-movflags', '+faststart', out], { timeout: 90000 });
+    const r = await fetch((hit.videos.small?.url || hit.videos.medium.url), { signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Could not download stock footage.');
+    const src = path.join(dir, 's.mp4'), out = path.join(dir, 'o.mp4'); await fs.writeFile(src, Buffer.from(await r.arrayBuffer())); await mark('encode');
+    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', src, '-t', '4.5', '-an', '-threads', '1', '-vf', `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=24,format=yuv420p`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-movflags', '+faststart', out], { timeout: 90000 });
     return await fs.readFile(out);
   } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
+let gpuDownAt = 0; // last time the free GPU quota failed; skip the slow AI attempt for 30 min after
 async function step(job) {
   if (job.status === 'queued' || job.status === 'scripting') { job.status = 'scripting'; await job.save(); return script(job); }
   if (job.status === 'clips') {
     const i = job.scenes.findIndex(s => s.state !== 'ok'); if (i < 0) { job.status = 'stitching'; return job.save(); }
     try {
       let data;
-      if (job.mode !== 'still') {
+      if (job.mode === 'ai' && Date.now() - gpuDownAt < 1800000 && (process.env.PIXABAY_KEY)) { job.mode = 'stock'; job.note = 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)'; await job.save(); }
+      if (job.mode === 'ai' || !job.mode) {
         try {
           const url = await generateClip({ prompt: job.scenes[i].prompt, seconds: 4, width: W, height: H });
           const r = await fetch(url, { signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Could not download the clip.');
           data = Buffer.from(await r.arrayBuffer());
         } catch (e) {
           if (!/used up|quota|GPU/i.test(e.message)) throw e;
+          gpuDownAt = Date.now();
           const done = job.scenes.filter(s => s.state === 'ok').length;
           if (done) { await VideoBlob.deleteMany({ jobId: job._id, kind: { $in: ['clip', 'audio'] } }); job.scenes.forEach(s => { s.state = 'wait'; }); }
           job.mode = process.env.PIXABAY_KEY ? 'stock' : 'still'; job.note = process.env.PIXABAY_KEY ? 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)' : 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion'; await job.save();
         }
       }
-      if (job.mode === 'stock') data = await stockClip(job, i);
+      if (job.mode === 'stock') { data = await stockClip(job, i); job.note = 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)'; }
       if (job.mode === 'still') data = await stillClip(job.scenes[i].prompt, i);
       await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'clip', idx: i, data });
       job.scenes[i].state = 'ok'; await job.save();
