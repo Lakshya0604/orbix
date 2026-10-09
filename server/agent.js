@@ -2,7 +2,7 @@ import { generateImage, imageEnabled } from './media.js';
 import { startJob } from './video.js';
 import { chatCompletion } from './llm.js';
 import { toolsOf, callTool, isConnected } from './mcp.js';
-import { searchDocs } from './rag.js';
+import { latestDocContext, searchDocs } from './rag.js';
 
 export const MAX_STEPS = 8;
 // Groq rejects JSON-schema $ref/$defs pointers, so inline them (depth-limited) and drop what it cannot take.
@@ -70,7 +70,8 @@ export async function runAgent({ userId, servers, history, userText, emit, ask, 
     } });
   }
   const names = [...new Set([...map.values()].map(v => v.server.name))];
-  const messages = [{ role: 'system', content: SYSTEM(names) }, ...history.slice(-12).map(m => ({ role: m.role, content: m.content })), { role: 'user', content: userText }];
+  const docCtx = hasDocs ? await latestDocContext(userId).catch(() => '') : '\nThe user has NO uploaded documents yet. If they say "this doc/file/pdf", tell them to tap the + button next to the message box, choose Document, upload it, then ask again.';
+  const messages = [{ role: 'system', content: SYSTEM(names) + (docCtx ? '\n' + docCtx : '') }, ...history.slice(-12).map(m => ({ role: m.role, content: m.content })), { role: 'user', content: userText }];
   const steps = [];
   for (let i = 0; i < MAX_STEPS; i++) {
     if (signal?.aborted) throw new Error('Stopped');
