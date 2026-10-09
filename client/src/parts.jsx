@@ -13,6 +13,8 @@ export async function download(url) {
   if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Download failed'); }
   const b = await r.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = nameOf(url); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
+export async function copyText(t) { try { await navigator.clipboard.writeText(t); return true; } catch { try { const a = document.createElement('textarea'); a.value = t; a.setAttribute('readonly', ''); a.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px'; document.body.appendChild(a); a.select(); a.setSelectionRange(0, t.length); const ok = document.execCommand('copy'); a.remove(); return ok; } catch { return false; } } }
+export function chatToText(title, msgs) { return `# ${title || 'Orbix chat'}\n\n` + msgs.filter(m => m.content).map(m => (m.role === 'user' ? '## You\n' : '## Orbix\n') + m.content).join('\n\n---\n\n') + '\n'; }
 export function saveText(text, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/markdown' })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
 
 function Media({ url, onError, shared }) {
