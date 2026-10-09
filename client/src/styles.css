@@ -244,3 +244,12 @@ input:focus,textarea:focus{border-color:var(--v);box-shadow:0 0 0 4px rgba(109,5
 .st-col{flex:1;height:100%;display:flex;align-items:flex-end}.st-col i{display:block;width:100%;min-height:2px;border-radius:4px 4px 0 0;background:linear-gradient(180deg,#7c5cff,#22d3ee)}
 .st-row{display:flex;align-items:center;gap:10px;margin:6px 0}.st-name{width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .st-bar{flex:1;height:8px;border-radius:99px;background:rgba(127,127,127,.18);overflow:hidden}.st-bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#7c5cff,#22d3ee)}
+
+.attach{position:relative;display:flex;align-items:flex-end}
+.attach-btn{width:44px;height:44px;border-radius:50%;border:1.5px solid var(--line);background:var(--card);font-size:24px;line-height:1;font-weight:500;color:var(--v);transition:transform .2s,box-shadow .2s,background .2s}
+.attach-btn:hover{box-shadow:0 6px 18px rgba(109,59,255,.25);transform:translateY(-1px)}.attach-btn[aria-expanded=true]{transform:rotate(45deg);background:var(--v);color:#fff;border-color:var(--v)}
+.attach-scrim{position:fixed;inset:0;z-index:40}
+.attach-menu{position:absolute;bottom:54px;left:0;z-index:41;min-width:230px;padding:6px;border-radius:18px;border:1px solid var(--line);background:var(--card);box-shadow:0 18px 50px rgba(30,20,70,.22);animation:attachIn .18s cubic-bezier(.22,1,.36,1)}
+.attach-menu>*{display:grid;grid-template-columns:34px 1fr;grid-template-rows:auto auto;align-items:center;column-gap:8px;width:100%;padding:9px 10px;border-radius:12px;text-align:left;background:none;border:0;cursor:pointer;color:inherit}
+.attach-menu>*:hover{background:rgba(109,59,255,.09)}.attach-menu span{grid-row:1/3;font-size:22px;text-align:center}.attach-menu b{font-size:14px}.attach-menu small{opacity:.6;font-size:12px}
+@keyframes attachIn{from{opacity:0;transform:translateY(8px) scale(.96)}to{opacity:1;transform:none}}
