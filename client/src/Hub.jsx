@@ -13,22 +13,31 @@ const SUGGEST = [
   'What is the current price of bitcoin and ethereum?',
 ];
 function ServerCard({ s, onReconnect, onRemove, onToggle, catalog, send, setDrawer }) {
+  const [open, setOpen] = useState(false);
   const label = { connected: 'Connected', connecting: 'Connecting…', error: 'Not working', disconnected: 'Offline' }[s.state];
+  const ex = (catalog.servers.find(c => c.id === s.catalogId)?.examples || []).slice(0, 3);
   return (
     <motion.div layout className={`srv ${s.state}`} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }}>
-      <div className="srv-top"><span className={`pulse ${s.state}`} /><b>{s.name}</b><span className="srv-state">{label}</span></div>
-      <div className="srv-meta">{s.state === 'connected' ? `${s.toolCount} tools · ${s.latencyMs} ms` : s.error || 'Not connected'}{s.hasKey ? ' · key set' : ''}</div>
-      {s.catalogId && s.state === 'connected' && catalog.servers.find(c => c.id === s.catalogId)?.examples?.[0] && <button className="try" onClick={() => { send(catalog.servers.find(c => c.id === s.catalogId).examples[0]); setDrawer(false); }}>▸ {catalog.servers.find(c => c.id === s.catalogId).examples[0]}</button>}
-        <div className="srv-actions">
-        <button className="chip" onClick={() => onReconnect(s)}>{s.state === 'connected' ? 'Refresh' : 'Reconnect'}</button>
-        <button className="chip" onClick={() => onToggle(s)}>{s.enabled ? 'Pause' : 'Resume'}</button>
-        <button className="chip danger" onClick={() => onRemove(s)}>Remove</button>
+      <div className="srv-row">
+        <button className="srv-main" onClick={() => setOpen(!open)} aria-expanded={open}>
+          <span className={`pulse ${s.state}`} />
+          <span className="srv-name"><b>{s.name}</b><small>{s.state === 'connected' ? `${s.toolCount} tools · ${s.latencyMs} ms` : (s.error || label)}{s.enabled === false ? ' · paused' : ''}</small></span>
+        </button>
+        <div className="srv-ic">
+          <button title={s.state === 'connected' ? 'Refresh' : 'Reconnect'} aria-label="Refresh" onClick={() => onReconnect(s)}>↻</button>
+          <button title={s.enabled ? 'Pause' : 'Resume'} aria-label="Pause" onClick={() => onToggle(s)}>{s.enabled ? '❚❚' : '▶'}</button>
+          <button className="danger" title="Remove" aria-label="Remove" onClick={() => onRemove(s)}>✕</button>
+        </div>
       </div>
+      <AnimatePresence initial={false}>{open && ex.length > 0 && s.state === 'connected' && <motion.div className="srv-ex" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
+        {ex.map(x => <button key={x} className="try" onClick={() => { send(x); setDrawer(false); }}>▸ {x}</button>)}
+      </motion.div>}</AnimatePresence>
     </motion.div>
   );
 }
 
 export default function Hub({ user, dark, setDark, logout }) {
+  const [tab, setTab] = useState('servers'); const [q, setQ] = useState(''); const [cat, setCat] = useState('all');
   const [servers, setServers] = useState([]);
   const [catalog, setCatalog] = useState({ servers: [], rejected: [] });
   const [health, setHealth] = useState({});
@@ -104,6 +113,8 @@ export default function Hub({ user, dark, setDark, logout }) {
   const decide = async allow => { const a = approval; setApproval(null); await api('/api/approve', { method: 'POST', body: { id: a.id, allow } }); };
 
   const connectedCount = servers.filter(s => s.state === 'connected').length;
+  const cats = [...new Set(catalog.servers.flatMap(c => c.tags || []))].sort();
+  const shown = catalog.servers.filter(c => (cat === 'all' || (c.tags || []).includes(cat)) && (!q || (c.name + c.description + (c.tags || []).join(' ')).toLowerCase().includes(q.toLowerCase())));
   const freeLeft = catalog.servers.filter(c => c.auth === 'none' && !servers.some(s => s.catalogId === c.id)).length;
 
   return (
@@ -120,41 +131,48 @@ export default function Hub({ user, dark, setDark, logout }) {
 
       <div className="layout">
         <aside className={`side ${drawer ? 'open' : ''}`}>
-          <section>
-            <div className="side-h"><h3>Your servers</h3>{freeLeft > 0 && <button className="chip accent" onClick={connectAllFree}>Connect all free ({freeLeft})</button>}</div>
+          <div className="tabs" role="tablist">
+            {[['servers', `Servers · ${connectedCount}`], ['catalog', `Catalog · ${catalog.servers.length}`], ['chats', `Chats · ${chats.length}`]].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
+          </div>
+          <div className="side-body">
+          {tab === 'servers' && <section>
+            {freeLeft > 0 && <button className="chip accent block" onClick={connectAllFree}>⚡ Connect all free ({freeLeft})</button>}
             <AnimatePresence initial={false}>{servers.map(s => <ServerCard key={s.id} s={s} onReconnect={reconnect} onRemove={remove} onToggle={toggle} catalog={catalog} send={send} setDrawer={setDrawer} />)}</AnimatePresence>
-            {!servers.length && <p className="empty">Nothing connected yet. Pick a server below, or press “Connect all free”.</p>}
-          </section>
-          <section>
-            <div className="side-h"><h3>Catalog</h3><button className="chip" onClick={() => checkHealth(true)} disabled={checking}>{checking ? 'Checking…' : 'Check health'}</button></div>
-            <p className="hint">Only servers that passed a real connection test are listed.</p>
-            {catalog.servers.map(c => {
+            {!servers.length && <p className="empty">Nothing connected yet. Open the Catalog tab and tap Connect, or press “Connect all free”.</p>}
+          </section>}
+          {tab === 'catalog' && <section>
+            <input className="search" type="search" placeholder="Search servers…" value={q} onChange={e => setQ(e.target.value)} />
+            <div className="cats">{['all', ...cats].map(c => <button key={c} className={cat === c ? 'on' : ''} onClick={() => setCat(c)}>{c}</button>)}</div>
+            <div className="side-h tight"><p className="hint">Every server here passed a real connection test.</p><button className="chip" onClick={() => checkHealth(true)} disabled={checking}>{checking ? 'Checking…' : 'Check health'}</button></div>
+            {shown.map(c => {
               const h = health[c.id]; const added = servers.some(s => s.catalogId === c.id);
               return (
                 <div key={c.id} className="cat">
                   <div className="cat-top"><b>{c.name}</b>
-                    <span className={`badge ${c.auth === 'none' ? 'free' : 'key'}`}>{c.auth === 'none' ? 'Free · no key' : 'Needs key'}</span></div>
+                    <span className={`badge ${c.auth === 'none' ? 'free' : 'key'}`}>{c.auth === 'none' ? 'Free' : 'Needs key'}</span></div>
                   <p>{c.description}</p>
-                  {added && c.examples?.slice(0, 2).map(x => <button key={x} className="try" onClick={() => { send(x); setDrawer(false); }}>▸ {x}</button>)}
                   <div className="cat-foot">
-                    <span className={`health ${h ? (h.ok ? 'up' : 'down') : 'unk'}`}>{h ? (h.ok ? `Working · ${h.latencyMs} ms` : `Not working: ${h.error}`) : `Tested ${c.testedAt}`}</span>
+                    <span className={`health ${h ? (h.ok ? 'up' : 'down') : 'unk'}`}>{h ? (h.ok ? `Working · ${h.latencyMs} ms` : `Not working`) : `${c.toolCount} tools · tested ${c.testedAt}`}</span>
                     {added ? <span className="added">✓ Added</span> : <button className="chip primary" onClick={() => addCatalog(c)}>Connect</button>}
                   </div>
                 </div>
               );
             })}
+            {!shown.length && <p className="empty">No server matches “{q}”.</p>}
             <button className="chip block" onClick={() => setCustom({ ...custom, open: !custom.open })}>{custom.open ? 'Close' : '+ Add any server by URL'}</button>
             {custom.open && <form className="custom" onSubmit={addCustom}>
               <input required placeholder="Name" value={custom.name} onChange={e => setCustom({ ...custom, name: e.target.value })} />
               <input required placeholder="https://server.example.com/mcp" value={custom.url} onChange={e => setCustom({ ...custom, url: e.target.value })} />
-              <input placeholder="API key (optional, stored encrypted)" type="password" value={custom.apiKey} onChange={e => setCustom({ ...custom, apiKey: e.target.value })} />
+              <input placeholder="Your own API key / token (optional, stored encrypted)" type="password" value={custom.apiKey} onChange={e => setCustom({ ...custom, apiKey: e.target.value })} />
               <button className="btn primary sm">Connect</button>
             </form>}
-          </section>
-          <section>
-            <div className="side-h"><h3>Chats</h3><button className="chip" onClick={newChat}>+ New</button></div>
+          </section>}
+          {tab === 'chats' && <section>
+            <button className="chip accent block" onClick={newChat}>+ New chat</button>
             {chats.map(c => <div key={c.id} className={`chat-row ${c.id === chatId ? 'on' : ''}`}><button onClick={() => openChat(c.id)}>{c.title}</button><button className="x" onClick={() => deleteChat(c.id)} aria-label="Delete chat">×</button></div>)}
-          </section>
+            {!chats.length && <p className="empty">Your chats will show up here.</p>}
+          </section>}
+          </div>
         </aside>
         {drawer && <div className="scrim" onClick={() => setDrawer(false)} />}
 
