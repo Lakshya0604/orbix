@@ -69,3 +69,17 @@ export async function generateAgnesClip({ prompt, frames = 97, fps = 24, width =
   }
   throw new Error('Agnes took too long.');
 }
+
+// Character consistency: FLUX.1 Kontext [dev] Space edits a reference picture, so the same character appears in every scene.
+const KSPACE = 'https://black-forest-labs-flux-1-kontext-dev.hf.space';
+export async function generateWithReference({ image, prompt }) {
+  const text = String(prompt || '').trim().slice(0, 600); if (!text || !image) throw new Error('Reference picture and prompt needed.');
+  const auths = [process.env.HF_TOKEN ? { authorization: `Bearer ${process.env.HF_TOKEN}` } : {}, {}]; let path = null;
+  for (const auth of auths) {
+    try { const fd = new FormData(); fd.append('files', new Blob([image], { type: 'image/jpeg' }), 'ref.jpg'); const u = await fetch(`${KSPACE}/gradio_api/upload`, { method: 'POST', body: fd, headers: auth, signal: AbortSignal.timeout(30000) }); if (u.ok) { path = (await u.json())?.[0]; if (path) break; } } catch { /* try next */ }
+  }
+  if (!path) throw new Error('Could not upload the character picture to the free GPU service.');
+  const out = await callSpace(KSPACE, 'infer', [{ path, meta: { _type: 'gradio.FileData' } }, text, 0, true, 2.5, 24], { startMs: 30000, waitMs: 150000 });
+  const url = out?.[0]?.url; if (!/^https:\/\/[a-z0-9.-]+\.hf\.space\//.test(url || '')) throw new Error('The character picture service returned no picture.');
+  return url;
+}
