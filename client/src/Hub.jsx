@@ -219,7 +219,7 @@ export default function Hub({ user, dark, setDark, logout }) {
           </section>}
           {tab === 'videos' && <section>
             <form onSubmit={makeVid} className="vid-form"><input value={vTopic} onChange={e => setVTopic(e.target.value)} placeholder="Topic, e.g. a haunted lighthouse" maxLength={200} disabled={!vids.enabled} /><button className="btn primary sm" disabled={!vids.enabled || vTopic.trim().length < 3 || activeVid}>Make video</button></form>
-            <p className="hint">Orbix writes a short script, makes about 4 AI clips and stitches them. It runs in the background, so you can leave. Free limits: 1 at a time, 4 a day, short silent clips (about 12 seconds in total).</p>
+            <p className="hint">Orbix writes a short script with a voiceover, makes 4 vertical AI clips (9:16) and stitches them with the voice. It runs in the background, so you can leave. Free limits: 1 at a time, 4 a day, about 16 seconds in total.</p>
             {vErr && <div className="msg err" role="alert">{vErr}</div>}
             {vids.jobs.map(j => <div key={j.id} className="vid-card">
               <div className="vid-top"><b>{j.title || j.topic}</b><span className={`vid-st st-${j.status}`}>{{ queued: 'Waiting', scripting: 'Writing script', clips: `Clips ${j.scenes.filter(x => x === 'ok').length}/${j.scenes.length || '?'}`, stitching: 'Stitching', done: 'Ready', failed: 'Failed' }[j.status]}</span></div>
