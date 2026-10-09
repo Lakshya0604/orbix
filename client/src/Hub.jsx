@@ -76,9 +76,9 @@ export default function Hub({ user, dark, setDark, logout }) {
   const playVid = async id => { try { setVPlay({ id, url: await fetchVid(id) }); } catch (x) { setVErr(x.message); } };
   const saveVid = async (id, name) => { try { const u = await fetchVid(id); const a = document.createElement('a'); a.href = u; a.download = `${(name || 'orbix-short').replace(/[^\w]+/g, '-').slice(0, 40)}.mp4`; a.click(); } catch (x) { setVErr(x.message); } };
   const removeVid = async id => { await api(`/api/videos/${id}`, { method: 'DELETE' }); if (vPlay?.id === id) setVPlay(null); loadVids(); };
-  const [hfModel, setHfModel] = useState(''); const [hfInfo, setHfInfo] = useState(null); const [hfIn, setHfIn] = useState(''); const [hfOut, setHfOut] = useState(null); const [hfBusy, setHfBusy] = useState(''); const [hfErr, setHfErr] = useState('');
-  const hfInspect = async e => { e?.preventDefault(); setHfErr(''); setHfOut(null); setHfInfo(null); setHfBusy('inspect'); try { setHfInfo(await api('/api/hf/inspect', { method: 'POST', body: { model: hfModel } })); } catch (x) { setHfErr(x.message); } setHfBusy(''); };
-  const hfRun = async e => { e.preventDefault(); setHfErr(''); setHfOut(null); setHfBusy('run'); try { setHfOut(await api('/api/hf/run', { method: 'POST', body: { model: hfModel, input: hfIn } })); } catch (x) { setHfErr(x.message); } setHfBusy(''); };
+  const [hfModel, setHfModel] = useState(''); const [hfInfo, setHfInfo] = useState(null); const [hfIn, setHfIn] = useState(''); const [hfOut, setHfOut] = useState(null); const [hfBusy, setHfBusy] = useState(''); const [hfErr, setHfErr] = useState(''); const [spEp, setSpEp] = useState(0); const [spVals, setSpVals] = useState({});
+  const hfInspect = async e => { e?.preventDefault(); setHfErr(''); setHfOut(null); setHfInfo(null); setHfBusy('inspect'); try { const inf = await api('/api/hf/inspect', { method: 'POST', body: { model: hfModel } }); setSpEp(Math.max(0, (inf.endpoints || []).findIndex(e => !e.blocked))); setSpVals({}); setHfInfo(inf); } catch (x) { setHfErr(x.message); } setHfBusy(''); };
+  const hfRun = async e => { e.preventDefault(); setHfErr(''); setHfOut(null); setHfBusy('run'); try { setHfOut(await api('/api/hf/run', { method: 'POST', body: hfInfo?.type === 'space' ? { model: hfModel, endpoint: hfInfo.endpoints[spEp].name, values: hfInfo.endpoints[spEp].params.map((_, i) => spVals[`${spEp}-${i}`]) } : { model: hfModel, input: hfIn } })); } catch (x) { setHfErr(x.message); } setHfBusy(''); };
   const loadDocs = useCallback(async () => setDocs(await api('/api/docs').catch(() => [])), []);
   const upload = async e => {
     const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
@@ -208,10 +208,16 @@ export default function Hub({ user, dark, setDark, logout }) {
             {!vids.jobs.length && <p className="empty">{vids.enabled ? 'No videos yet. Type a topic above.' : 'Video is not switched on for this app yet.'}</p>}
           </section>}
           {tab === 'hf' && <section>
-            <form onSubmit={hfInspect} className="vid-form"><input value={hfModel} onChange={e => setHfModel(e.target.value)} placeholder="Paste any Hugging Face model link, e.g. Qwen/Qwen2.5-7B-Instruct" /><button className="btn primary sm" disabled={hfBusy || hfModel.trim().length < 3}>{hfBusy === 'inspect' ? '…' : 'Load'}</button></form>
-            <p className="hint">Works with text chat models, image makers, and classifiers that Hugging Face serves for free. Some models are not served; Orbix tells you honestly.</p>
+            <form onSubmit={hfInspect} className="vid-form"><input value={hfModel} onChange={e => setHfModel(e.target.value)} placeholder="Paste a Hugging Face Space or model link" /><button className="btn primary sm" disabled={hfBusy || hfModel.trim().length < 3}>{hfBusy === 'inspect' ? '…' : 'Load'}</button></form>
+            <p className="hint">Paste a Space link (best, runs on free GPU) to get a ready form for it. Model links work only if Hugging Face serves them free, and the monthly free credit can run out. Orbix tells you honestly.</p>
             {hfErr && <div className="msg err" role="alert">{hfErr}</div>}
-            {hfInfo && <div className="vid-card"><div className="vid-top"><b>{hfInfo.id}</b><span className="vid-st">{hfInfo.task || 'unknown task'}</span></div>
+            {hfInfo?.type === 'space' && (() => { const ep = hfInfo.endpoints[spEp]; return <div className="vid-card"><div className="vid-top"><b>{hfInfo.host.replace('.hf.space', '')}</b><span className="vid-st">Space</span></div>
+              <select value={spEp} onChange={e => { setSpEp(Number(e.target.value)); setHfOut(null); }} style={{ width: '100%', margin: '6px 0' }}>{hfInfo.endpoints.map((e, i) => <option key={e.name} value={i} disabled={e.blocked}>{e.name}{e.blocked ? ' (needs a file, not supported)' : ''}</option>)}</select>
+              <form onSubmit={hfRun}>{ep.params.map((p, i) => /bool/.test(p.type) ? <label key={i} className="sp-f"><input type="checkbox" checked={spVals[`${spEp}-${i}`] ?? !!p.def} onChange={e => setSpVals({ ...spVals, [`${spEp}-${i}`]: e.target.checked })} /> {p.label}</label> : <label key={i} className="sp-f"><small>{p.label}</small><input value={spVals[`${spEp}-${i}`] ?? ''} onChange={e => setSpVals({ ...spVals, [`${spEp}-${i}`]: e.target.value })} placeholder={p.def == null ? 'required' : `default: ${String(p.def).slice(0, 30)}`} inputMode={/int|float/.test(p.type) ? 'decimal' : 'text'} /></label>)}
+                <button className="btn primary sm" disabled={!!hfBusy || ep.blocked}>{hfBusy === 'run' ? 'Running… (can take a minute)' : 'Run'}</button></form>
+              {hfOut?.kind === 'space' && hfOut.items.map((it, i) => it.kind === 'image' ? <img key={i} src={it.url} alt="Output" style={{ width: '100%', borderRadius: 12, marginTop: 10 }} /> : it.kind === 'video' ? <video key={i} src={it.url} controls playsInline style={{ width: '100%', borderRadius: 12, marginTop: 10 }} /> : it.kind === 'audio' ? <audio key={i} src={it.url} controls style={{ width: '100%', marginTop: 10 }} /> : it.kind === 'file' ? <a key={i} className="chip accent" href={it.url} target="_blank" rel="noreferrer">Open output file</a> : <pre key={i} className="hf-out">{it.text}</pre>)}
+            </div>; })()}
+            {hfInfo && hfInfo.type !== 'space' && <div className="vid-card"><div className="vid-top"><b>{hfInfo.id}</b><span className="vid-st">{hfInfo.task || 'unknown task'}</span></div>
               <p className="hint">{hfInfo.downloads.toLocaleString()} downloads · {hfInfo.likes} likes{hfInfo.live ? ' · served for free' : ' · not served on the free service (it may fail)'}</p>
               <form onSubmit={hfRun}><textarea rows={3} value={hfIn} onChange={e => setHfIn(e.target.value)} placeholder={/image/.test(hfInfo.task) ? 'Describe the picture' : 'Type your input'} style={{ width: '100%' }} /><button className="btn primary sm" disabled={hfBusy || !hfIn.trim()}>{hfBusy === 'run' ? 'Running…' : 'Run'}</button></form>
               {hfOut?.kind === 'image' && <img src={hfOut.url} alt="Model output" style={{ width: '100%', borderRadius: 12, marginTop: 10 }} />}
@@ -283,4 +289,4 @@ export default function Hub({ user, dark, setDark, logout }) {
       <AnimatePresence>{toast && <motion.div className="toast" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
     </div>
   );
-      }
+}
