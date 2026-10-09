@@ -9,7 +9,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { User, Server, Chat } from './models.js';
+import { User, Server, Chat, Visit } from './models.js';
 import { encrypt } from './crypto.js';
 import { sendMail } from './mail.js';
 import { assertPublicUrl } from './ssrf.js';
@@ -23,7 +23,7 @@ app.set('trust proxy', 1);
 const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? null : 'dev-secret');
 if (!JWT_SECRET) throw new Error('JWT_SECRET is required');
 const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
-const sign = u => jwt.sign({ sub: String(u._id) }, JWT_SECRET, { algorithm: 'HS256', expiresIn: u.isGuest ? '1d' : '14d' });
+const sign = u => jwt.sign({ sub: String(u._id) }, JWT_SECRET, { algorithm: 'HS256', expiresIn: u.isGuest ? '1d' : '90d' });
 const GUEST_LIMIT = Number(process.env.GUEST_TASKS || 3);
 const publicUser = u => ({ id: String(u._id), email: u.email || null, guest: !!u.isGuest, guestLeft: u.isGuest ? Math.max(0, GUEST_LIMIT - (u.guestUses || 0)) : null, name: u.isGuest ? 'Guest' : (u.name || u.email.split('@')[0]) });
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(e => { console.error(e.message); res.status(e.status || 500).json({ error: e.status ? e.message : 'Something went wrong' }); });
@@ -39,7 +39,7 @@ const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 40, standardHea
 
 const auth = wrap(async (req, res, next) => {
   const h = req.headers.authorization || '';
-  try { const p = jwt.verify(h.replace(/^Bearer /, ''), JWT_SECRET, { algorithms: ['HS256'] }); const u = await User.findById(p.sub); if (!u) throw 0; req.user = u; next(); }
+  try { const p = jwt.verify(h.replace(/^Bearer /, ''), JWT_SECRET, { algorithms: ['HS256'] }); const u = await User.findById(p.sub); if (!u) throw 0; req.user = u; req.tokenIat = p.iat; next(); }
   catch { res.status(401).json({ error: 'Please sign in again.' }); }
 });
 
@@ -62,7 +62,32 @@ app.post('/api/auth/login', authLimiter, wrap(async (q, r) => {
   if (!u?.passwordHash || !(await bcrypt.compare(String(password || ''), u.passwordHash))) throw bad('Wrong email or password.', 401);
   r.json({ token: sign(u), user: publicUser(u) });
 }));
-app.get('/api/auth/me', auth, (q, r) => r.json({ user: publicUser(q.user) }));
+// sliding session: a token older than 7 days is swapped for a fresh 90-day one, so active users stay signed in
+app.get('/api/auth/me', auth, (q, r) => r.json({ user: publicUser(q.user), ...(!q.user.isGuest && Date.now() / 1000 - (q.tokenIat || 0) > 7 * 86400 ? { token: sign(q.user) } : {}) }));
+// ---------- privacy-friendly analytics (no cookies, no raw IPs) ----------
+const trackLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
+const dayOf = (d = new Date()) => new Date(d.getTime() + 330 * 60000).toISOString().slice(0, 10);
+app.post('/api/track', trackLimiter, wrap(async (q, r) => {
+  const ua = String(q.headers['user-agent'] || '');
+  if (/bot|crawl|spider|monitor|uptime|curl|python|node-fetch|headless/i.test(ua)) return r.json({ ok: true });
+  let p = String(q.body?.path || '/').split('?')[0].slice(0, 60); if (!p.startsWith('/')) p = '/' + p; if (p.startsWith('/s/')) p = '/s/…'; if (p === '/reset' || p === '/auth') p = '/login';
+  let ref = ''; try { const h = new URL(String(q.body?.ref || '')).hostname.replace(/^www\./, ''); if (h && !/orbix-3av3\.onrender\.com$/.test(h)) ref = h.slice(0, 60); } catch {}
+  const day = dayOf();
+  const vid = crypto.createHash('sha256').update(`${q.ip}|${ua}|${day}|${JWT_SECRET}`).digest('hex').slice(0, 16);
+  await Visit.create({ day, path: p, ref, vid, device: /mobile|android|iphone/i.test(ua) ? 'mobile' : 'desktop' });
+  r.json({ ok: true });
+}));
+const admins = () => (process.env.ADMIN_EMAILS || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
+app.get('/api/stats', auth, wrap(async (q, r) => {
+  if (q.user.isGuest || !admins().includes(String(q.user.email || '').toLowerCase())) throw bad('Not allowed.', 403);
+  const since = dayOf(new Date(Date.now() - 29 * 86400000));
+  const rows = await Visit.find({ day: { $gte: since } }).select('day path ref vid device').lean();
+  const uniq = a => new Set(a).size, tally = (f, n = 8) => Object.entries(rows.reduce((m, x) => { const k = f(x); if (k) m[k] = (m[k] || 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]).slice(0, n).map(([name, count]) => ({ name, count }));
+  const today = dayOf(), byDay = {};
+  for (const x of rows) { (byDay[x.day] ||= []).push(x.vid); }
+  const days = Array.from({ length: 30 }, (_, i) => dayOf(new Date(Date.now() - (29 - i) * 86400000))).map(d => ({ day: d, views: (byDay[d] || []).length, visitors: uniq(byDay[d] || []) }));
+  r.json({ totalViews: rows.length, visitors30d: uniq(rows.map(x => x.vid + x.day)), todayViews: (byDay[today] || []).length, todayVisitors: uniq(byDay[today] || []), days, pages: tally(x => x.path), referrers: tally(x => x.ref), devices: tally(x => x.device, 3), users: await User.countDocuments({ isGuest: false }) });
+}));
 app.post('/api/auth/forgot', authLimiter, wrap(async (q, r) => {
   const email = String(q.body?.email || '').toLowerCase();
   const u = emailOk(email) && await User.findOne({ email });
