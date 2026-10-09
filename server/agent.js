@@ -2,6 +2,18 @@ import { chatCompletion } from './llm.js';
 import { toolsOf, callTool, isConnected } from './mcp.js';
 
 export const MAX_STEPS = 8;
+// Groq rejects JSON-schema $ref/$defs pointers, so inline them (depth-limited) and drop what it cannot take.
+export function cleanSchema(root) {
+  const defs = { ...(root.$defs || {}), ...(root.definitions || {}) };
+  const walk = (n, d) => {
+    if (Array.isArray(n)) return n.map(x => walk(x, d));
+    if (!n || typeof n !== 'object') return n;
+    if (n.$ref) { const k = String(n.$ref).split('/').pop(); return d < 4 && defs[k] ? walk(defs[k], d + 1) : { type: 'object' }; }
+    const o = {}; for (const [k, v] of Object.entries(n)) { if (['$defs', 'definitions', '$schema', 'additionalProperties', 'title'].includes(k) && typeof v !== 'object' ? true : ['$defs', 'definitions', '$schema', 'title'].includes(k)) continue; o[k] = walk(v, d); }
+    return o;
+  };
+  const out = walk(root, 0); if (!out.properties) out.properties = {}; return out;
+}
 const MEDIA_RE = /https:\/\/[^\s"'<>)\]]+?(?:\.(?:mp4|webm|mov|png|jpe?g|webp|gif|mp3|wav|pdf|zip|csv)|\/file=[^\s"'<>)\]]+)/gi;
 export const mediaIn = text => [...new Set(String(text).match(MEDIA_RE) || [])].slice(0, 6);
 const MAX_TOOLS = 48;
@@ -23,7 +35,7 @@ export function buildToolbox(userId, servers) {
       const fn = `${safe(s.slug)}__${t.name}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
       if (map.has(fn)) continue;
       map.set(fn, { server: s, tool: t });
-      defs.push({ type: 'function', function: { name: fn, description: `[${s.name}] ${(t.description || t.name).slice(0, 400)}`, parameters: t.inputSchema?.type === 'object' ? t.inputSchema : { type: 'object', properties: {} } } });
+      defs.push({ type: 'function', function: { name: fn, description: `[${s.name}] ${(t.description || t.name).slice(0, 400)}`, parameters: t.inputSchema?.type === 'object' ? cleanSchema(t.inputSchema) : { type: 'object', properties: {} } } });
     }
   }
   return { map, defs };
