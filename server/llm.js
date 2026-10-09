@@ -46,19 +46,20 @@ export async function chatCompletion({ messages, tools }) {
   const key = process.env.GROQ_API_KEY;
   if (!key) throw new Error('The AI model is not configured on this server.');
   let budget = IN_BUDGET;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  const MODELS = [MODEL, 'openai/gpt-oss-20b', 'llama-3.3-70b-versatile']; let lastErr = '';
+  for (let attempt = 0; attempt < 6; attempt++) {
     const f = fit(messages, tools, budget);
-    const body = { model: MODEL, messages: f.messages, temperature: 0.3, max_tokens: OUT_TOKENS };
+    const body = { model: MODELS[Math.min(MODELS.length - 1, Math.floor(attempt / 2))], messages: f.messages, temperature: 0.3, max_tokens: OUT_TOKENS };
     if (f.tools?.length) { body.tools = f.tools; body.tool_choice = 'auto'; }
     const r = await fetch(URL_, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` }, body: JSON.stringify(body), signal: AbortSignal.timeout(90000) });
     const j = await r.json().catch(() => ({}));
     const em = String(j?.error?.message || '');
     if (r.status === 413 || /too large|reduce your m/i.test(em)) { budget = Math.floor(budget * 0.65); continue; } // shrink and retry instead of failing
-    if (r.status === 429 || r.status >= 500) { const wait = Math.min(8000, 1500 * (attempt + 1)); await new Promise(res => setTimeout(res, wait)); continue; }
+    if (r.status === 429 || r.status >= 500) { lastErr = `${r.status} ${em}`.slice(0, 160); const wait = Math.min(8000, 1500 * (attempt + 1)); await new Promise(res => setTimeout(res, wait)); continue; }
     if (!r.ok) throw new Error(em ? em.slice(0, 200) : `Model error ${r.status}`);
     return j.choices[0].message;
   }
-  throw new Error('The AI model is busy right now. Try again in a moment.');
+  console.error('llm busy', lastErr); throw new Error('The AI model is busy right now. Try again in a moment.' + (process.env.LLM_DEBUG ? ' [' + lastErr + ']' : ''));
 }
 
 // Photo and video understanding through Groq's free vision models (images only, small request).
