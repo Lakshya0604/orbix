@@ -39,9 +39,23 @@ async function script(job) {
     outline = `Story title: ${o.title}\n` + o.acts.map((x, i) => `${i + 1}. ${x.act}: ${x.beat}`).join('\n'); job.title = String(o.title || job.topic).slice(0, 80);
   }
   let j = null;
-  for (let tryN = 0; tryN < 3 && !j; tryN++) {
-    const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: `You write vertical YouTube Shorts style narrated stories. Reply with ONLY valid JSON (never use double quote characters inside the text values): {"title":"...","scenes":[{"act":"intro","shot":"...","kw":"...","say":"..."}]}. Exactly ${N} scenes. ${ARC} "act" is one of intro, buildup, twist, climax, ending and the scenes follow that order. "shot" is ONE visual description in English, 20 to 40 words, concrete (subject, setting, light, camera move), no text overlays, no real people or brands. "kw" is 2 or 3 plain English words to search a stock video site for this shot (for example "lighthouse storm sea"). "say" is the narration for that shot, spoken in the same language as the user's topic (English if unsure; Hindi in Devanagari script if the topic is Hindi or Hinglish): ${job.long ? '1 or 2 sentences of 12 to 22 words' : 'ONE sentence of 8 to 12 words'}.${outline ? `\nFollow this story plan and spread the scenes across it in order:\n${outline}` : ''}` }, { role: 'user', content: `Topic: ${job.topic}` }] });
-    const x = jsonOf(m.content); if (x && Array.isArray(x.scenes) && x.scenes.length >= Math.min(N, 4) && (!job.long || x.scenes.length >= Math.round(N * 0.7))) j = x;
+  const sysFor = (n, extra) => `You write vertical YouTube Shorts style narrated stories. Reply with ONLY valid JSON (never use double quote characters inside the text values): {"title":"...","scenes":[{"act":"intro","shot":"...","kw":"...","say":"..."}]}. Exactly ${n} scenes. ${ARC} "act" is one of intro, buildup, twist, climax, ending. "shot" is ONE visual description in English, 20 to 40 words, concrete (subject, setting, light, camera move), no text overlays, no real people or brands. "kw" is 2 or 3 plain English words to search a stock video site for this shot (for example "lighthouse storm sea"). "say" is the narration for that shot, spoken in the same language as the user's topic (English if unsure; Hindi in Devanagari script if the topic is Hindi or Hinglish): ${job.long ? '1 or 2 sentences of 12 to 22 words' : 'ONE sentence of 8 to 12 words'}.${extra || ''}`;
+  if (job.long) {
+    const plan = [['intro', 3], ['buildup', 3], ['twist', 2], ['climax', 3], ['ending', 3]]; const acc = [];
+    for (const [act, n] of plan) {
+      let got = null;
+      for (let t = 0; t < 3 && !got; t++) {
+        job.stage = `Writing the story: ${act}`; await job.save().catch(() => {});
+        const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: sysFor(n, `\nStory plan:\n${outline}\nWrite ONLY the "${act}" part now: exactly ${n} scenes, all with act "${act}".${acc.length ? `\nNarration so far (continue straight from it):\n${acc.map(x => x.say).join(' ')}` : ''}`) }, { role: 'user', content: `Topic: ${job.topic}` }] });
+        const x = jsonOf(m.content); if (x && Array.isArray(x.scenes) && x.scenes.length >= 2) got = x.scenes.slice(0, n);
+      }
+      if (!got) throw new Error('The script came back broken. Try again.');
+      got.forEach(x => { if (x && typeof x === 'object') x.act = act; }); acc.push(...got);
+    }
+    j = { title: job.title, scenes: acc };
+  } else for (let tryN = 0; tryN < 3 && !j; tryN++) {
+    const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: sysFor(N, ` The scenes follow that order.`) }, { role: 'user', content: `Topic: ${job.topic}` }] });
+    const x = jsonOf(m.content); if (x && Array.isArray(x.scenes) && x.scenes.length >= Math.min(N, 4)) j = x;
   }
   if (!j) throw new Error('The script came back broken. Try again.');
   const scenes = j.scenes.map(x => typeof x === 'string' ? { act: '', shot: x, kw: '', say: '' } : { act: String(x?.act || ''), shot: String(x?.shot || ''), kw: String(x?.kw || ''), say: String(x?.say || '') }).filter(x => x.shot).slice(0, N).map(x => ({ act: x.act.slice(0, 12), prompt: x.shot.slice(0, 400), kw: x.kw.replace(/[^\w ]/g, ' ').slice(0, 60).trim(), say: x.say.slice(0, 320) }));
