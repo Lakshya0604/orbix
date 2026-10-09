@@ -28,7 +28,8 @@ export default function Orbit3D({ count = 7, dark }) {
       s.userData = { r, speed: 0.25 + i * 0.07, a: i * 1.1 }; pivot.add(s); sats.push(s);
     }
     const resize = () => { const w = el.clientWidth || 300, h = el.clientHeight || 300; renderer.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix(); };
-    resize(); const ro = new ResizeObserver(resize); ro.observe(el);
+    resize(); sats.forEach(s => { const { r, a } = s.userData; s.position.set(Math.cos(a) * r, 0, Math.sin(a) * r); }); renderer.render(scene, cam); // first frame always paints, even in a hidden tab
+    const ro = new ResizeObserver(resize); ro.observe(el);
     let raf, visible = true, t = 0, mx = 0, my = 0;
     const io = new IntersectionObserver(([e]) => { visible = e.isIntersecting; }); io.observe(el);
     const move = e => { const b = el.getBoundingClientRect(); mx = ((e.clientX - b.left) / b.width - 0.5) * 2; my = ((e.clientY - b.top) / b.height - 0.5) * 2; };
