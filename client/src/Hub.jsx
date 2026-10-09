@@ -41,7 +41,7 @@ export default function Hub({ user, dark, setDark, logout }) {
   const [servers, setServers] = useState([]);
   const [catalog, setCatalog] = useState({ servers: [], rejected: [] });
   const [health, setHealth] = useState({});
-  const [chats, setChats] = useState([]); const [docs, setDocs] = useState([]); const [upBusy, setUpBusy] = useState(false); const [attach, setAttach] = useState(false);
+  const [chats, setChats] = useState([]); const [docs, setDocs] = useState([]); const [upBusy, setUpBusy] = useState(false); const [attach, setAttach] = useState(false); const [lastDoc, setLastDoc] = useState(null); const fileRef = useRef(null);
   const [chatId, setChatId] = useState(null);
   const [msgs, setMsgs] = useState([]);
   const [live, setLive] = useState(null); // {steps, status}
@@ -76,12 +76,16 @@ export default function Hub({ user, dark, setDark, logout }) {
   const playVid = async id => { try { setVPlay({ id, url: await fetchVid(id) }); } catch (x) { setVErr(x.message); } };
   const saveVid = async (id, name) => { try { const u = await fetchVid(id); const a = document.createElement('a'); a.href = u; a.download = `${(name || 'orbix-short').replace(/[^\w]+/g, '-').slice(0, 40)}.mp4`; a.click(); } catch (x) { setVErr(x.message); } };
   const removeVid = async id => { await api(`/api/videos/${id}`, { method: 'DELETE' }); if (vPlay?.id === id) setVPlay(null); loadVids(); };
+  const [hfModel, setHfModel] = useState(''); const [hfInfo, setHfInfo] = useState(null); const [hfIn, setHfIn] = useState(''); const [hfOut, setHfOut] = useState(null); const [hfBusy, setHfBusy] = useState(''); const [hfErr, setHfErr] = useState('');
+  const hfInspect = async e => { e?.preventDefault(); setHfErr(''); setHfOut(null); setHfInfo(null); setHfBusy('inspect'); try { setHfInfo(await api('/api/hf/inspect', { method: 'POST', body: { model: hfModel } })); } catch (x) { setHfErr(x.message); } setHfBusy(''); };
+  const hfRun = async e => { e.preventDefault(); setHfErr(''); setHfOut(null); setHfBusy('run'); try { setHfOut(await api('/api/hf/run', { method: 'POST', body: { model: hfModel, input: hfIn } })); } catch (x) { setHfErr(x.message); } setHfBusy(''); };
   const loadDocs = useCallback(async () => setDocs(await api('/api/docs').catch(() => [])), []);
   const upload = async e => {
     const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
-    if (f.size > 6 * 1024 * 1024) { say('File is over 6 MB.'); return; }
+    if (f.size > 25 * 1024 * 1024) { say('File is over 25 MB.'); return; }
+    if (/\.(png|jpe?g|webp|gif|heic|mp4|mov|webm)$/i.test(f.name) || /^(image|video)\//.test(f.type)) { say('Photos and videos cannot be read yet. Upload a PDF, DOCX, TXT, MD or CSV.'); return; }
     setUpBusy(true);
-    try { const r = await fetch(`/api/docs?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token()}` }, body: f }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Upload failed'); say(`${j.name} added (${j.chunks} parts)`); loadDocs(); } catch (x) { say(x.message); }
+    try { const r = await fetch(`/api/docs?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token()}` }, body: f }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Upload failed'); setLastDoc({ name: j.name, chunks: j.chunks }); say(`${j.name} added (${j.chunks} parts)`); loadDocs(); } catch (x) { say(x.message); }
     setUpBusy(false);
   };
   const soon = what => { setAttach(false); say(`${what} understanding is coming in the next update. Documents work now.`); };
@@ -153,7 +157,7 @@ export default function Hub({ user, dark, setDark, logout }) {
       <div className="layout">
         <aside className={`side ${drawer ? 'open' : ''}`}>
           <div className="tabs" role="tablist">
-            {[['servers', `Servers · ${connectedCount}`], ['catalog', `Catalog · ${catalog.servers.length}`], ['chats', `Chats · ${chats.length}`], ['docs', `Docs · ${docs.length}`], ['videos', `Videos · ${vids.jobs.length}`]].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
+            {[['servers', `Servers · ${connectedCount}`], ['catalog', `Catalog · ${catalog.servers.length}`], ['chats', `Chats · ${chats.length}`], ['docs', `Docs · ${docs.length}`], ['videos', `Videos · ${vids.jobs.length}`], ['hf', 'Playground']].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
           </div>
           <div className="side-body">
           {tab === 'servers' && <section>
@@ -203,9 +207,20 @@ export default function Hub({ user, dark, setDark, logout }) {
             </div>)}
             {!vids.jobs.length && <p className="empty">{vids.enabled ? 'No videos yet. Type a topic above.' : 'Video is not switched on for this app yet.'}</p>}
           </section>}
+          {tab === 'hf' && <section>
+            <form onSubmit={hfInspect} className="vid-form"><input value={hfModel} onChange={e => setHfModel(e.target.value)} placeholder="Paste any Hugging Face model link, e.g. Qwen/Qwen2.5-7B-Instruct" /><button className="btn primary sm" disabled={hfBusy || hfModel.trim().length < 3}>{hfBusy === 'inspect' ? '…' : 'Load'}</button></form>
+            <p className="hint">Works with text chat models, image makers, and classifiers that Hugging Face serves for free. Some models are not served; Orbix tells you honestly.</p>
+            {hfErr && <div className="msg err" role="alert">{hfErr}</div>}
+            {hfInfo && <div className="vid-card"><div className="vid-top"><b>{hfInfo.id}</b><span className="vid-st">{hfInfo.task || 'unknown task'}</span></div>
+              <p className="hint">{hfInfo.downloads.toLocaleString()} downloads · {hfInfo.likes} likes{hfInfo.live ? ' · served for free' : ' · not served on the free service (it may fail)'}</p>
+              <form onSubmit={hfRun}><textarea rows={3} value={hfIn} onChange={e => setHfIn(e.target.value)} placeholder={/image/.test(hfInfo.task) ? 'Describe the picture' : 'Type your input'} style={{ width: '100%' }} /><button className="btn primary sm" disabled={hfBusy || !hfIn.trim()}>{hfBusy === 'run' ? 'Running…' : 'Run'}</button></form>
+              {hfOut?.kind === 'image' && <img src={hfOut.url} alt="Model output" style={{ width: '100%', borderRadius: 12, marginTop: 10 }} />}
+              {hfOut && hfOut.kind !== 'image' && <pre className="hf-out">{hfOut.text}</pre>}
+            </div>}
+          </section>}
           {tab === 'docs' && <section>
             <label className="chip accent block" style={{ cursor: 'pointer', textAlign: 'center' }}>{upBusy ? 'Reading your file…' : '+ Upload a document'}<input type="file" hidden disabled={upBusy} accept=".pdf,.docx,.txt,.md,.csv,.json,.html,.log" onChange={upload} /></label>
-            <p className="hint">PDF, DOCX, TXT, MD, CSV or JSON, up to 6 MB. Your chat searches these files when a question needs them, together with your MCP tools. Only you can see them.</p>
+            <p className="hint">PDF, DOCX, TXT, MD, CSV or JSON, up to 25 MB. Your chat searches these files when a question needs them, together with your MCP tools. Only you can see them.</p>
             {docs.map(d => <div key={d.id} className="chat-row"><button style={{ cursor: 'default' }}>{d.name} <small>· {d.chunks} parts</small></button><button className="x" onClick={() => removeDoc(d.id)} aria-label="Delete document">×</button></div>)}
             {!docs.length && <p className="empty">No documents yet. Upload one, then ask a question about it in the chat.</p>}
           </section>}
@@ -241,11 +256,13 @@ export default function Hub({ user, dark, setDark, logout }) {
             {live && <div className="msg assistant"><Steps steps={live.steps} live /><div className="typing"><span /><span /><span /><em>{live.status}</em></div></div>}
             <div ref={bottom} />
           </div>
+          {lastDoc && <div className="doc-chip"><span>📄 <b>{lastDoc.name}</b> ready · {lastDoc.chunks} parts. Ask a question about it.</span><button type="button" className="x" onClick={() => setLastDoc(null)} aria-label="Dismiss">×</button></div>}
+          <input ref={fileRef} type="file" hidden accept=".pdf,.docx,.txt,.md,.csv,.json,.html,.log" onChange={upload} />
           <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
             <div className="attach">
               <button type="button" className="attach-btn" aria-label="Attach" aria-expanded={attach} disabled={upBusy} onClick={() => setAttach(a => !a)}>{upBusy ? '…' : '+'}</button>
               {attach && <><div className="attach-scrim" onClick={() => setAttach(false)} /><div className="attach-menu" role="menu">
-                <label role="menuitem"><span>📄</span><b>Document</b><small>PDF, DOCX, TXT, CSV</small><input type="file" hidden accept=".pdf,.docx,.txt,.md,.csv,.json,.html,.log" onChange={e => { setAttach(false); upload(e); }} /></label>
+                <button type="button" role="menuitem" onClick={() => { setAttach(false); fileRef.current?.click(); }}><span>📄</span><b>Document</b><small>PDF, DOCX, TXT, CSV · up to 25 MB</small></button>
                 <button type="button" role="menuitem" onClick={() => soon('Photo')}><span>🖼</span><b>Photo</b><small>coming soon</small></button>
                 <button type="button" role="menuitem" onClick={() => soon('Video')}><span>🎬</span><b>Video</b><small>coming soon</small></button>
               </div></>}
@@ -266,4 +283,4 @@ export default function Hub({ user, dark, setDark, logout }) {
       <AnimatePresence>{toast && <motion.div className="toast" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
     </div>
   );
-}
+      }
