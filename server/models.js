@@ -5,6 +5,7 @@ export const User = model('User', new Schema({
   isGuest: { type: Boolean, default: false, index: true },
   guestUses: { type: Number, default: 0 },
   name: { type: String, default: '' },
+  avatar: { type: String, default: 'orbi' },
   passwordHash: String,
   googleId: { type: String, index: true, sparse: true },
   githubId: { type: String, index: true, sparse: true },
