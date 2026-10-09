@@ -67,7 +67,7 @@ app.post('/api/auth/forgot', authLimiter, wrap(async (q, r) => {
     const raw = crypto.randomBytes(32).toString('hex');
     u.resetHash = crypto.createHash('sha256').update(raw).digest('hex'); u.resetExpires = new Date(Date.now() + 30 * 60 * 1000); await u.save();
     const link = `${APP_URL || `${q.protocol}://${q.get('host')}`}/#/reset?token=${raw}`;
-    await sendMail({ to: u.email, subject: 'Reset your Orbix password', html: `<p>Use this link within 30 minutes to choose a new password:</p><p><a href="${link}">Reset password</a></p><p>If you did not ask for this, ignore this email.</p>` });
+    await sendMail({ to: u.email, subject: 'Reset your Orbix password', html: `<p>Use this link within 30 minutes to choose a new password:</p><p><a href="${link}">Reset password</a></p><p style="font-size:13px;color:#555">If the button does not open, copy this address into your browser:<br>${link}</p><p>If you did not ask for this, ignore this email.</p>` });
   }
   r.json({ ok: true });
 }));
