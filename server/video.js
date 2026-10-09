@@ -50,7 +50,7 @@ function assFile(text, a, b) {
   return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Default,${dev ? 'Noto Sans Devanagari' : 'Noto Sans'},34,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,24,24,110,1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\nDialogue: 0,${assTime(a)},${assTime(b)},Default,,0,0,0,,${clean}\n`;
 }
 async function lyricScript(job) {
-  const song = await VideoBlob.findOne({ jobId: job._id, kind: 'song' }); if (!song) throw new Error('The song file is missing.');
+  let song = null; for (let k = 0; k < 8 && !song; k++) { song = await VideoBlob.findOne({ jobId: job._id, kind: 'song' }); if (!song) await new Promise(r => setTimeout(r, 2500)); } if (!song) throw new Error('The song file is missing.');
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-l-'));
   try {
     job.stage = 'Listening to the song'; await job.save();
