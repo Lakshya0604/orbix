@@ -69,10 +69,11 @@ export default function Hub({ user, dark, setDark, logout }) {
   const [vids, setVids] = useState({ enabled: false, jobs: [] }); const [vTopic, setVTopic] = useState(''); const [vErr, setVErr] = useState(''); const [vPlay, setVPlay] = useState(null);
   const loadVids = useCallback(async () => { try { setVids(await api('/api/videos')); } catch {} }, []);
   const [vLong, setVLong] = useState(false);
+  const [vChar, setVChar] = useState(false);
   const activeVid = vids.jobs.some(j => !['done', 'failed'].includes(j.status));
   useEffect(() => { loadVids(); }, [loadVids]);
   useEffect(() => { if (!activeVid) return; const t = setInterval(loadVids, 4000); return () => clearInterval(t); }, [activeVid, loadVids]);
-  const makeVid = async e => { e.preventDefault(); setVErr(''); try { await api('/api/videos', { method: 'POST', body: { topic: vTopic, long: vLong } }); setVTopic(''); loadVids(); } catch (x) { setVErr(x.message); } };
+  const makeVid = async e => { e.preventDefault(); setVErr(''); try { await api('/api/videos', { method: 'POST', body: { topic: vTopic, long: vLong, char: vChar } }); setVTopic(''); loadVids(); } catch (x) { setVErr(x.message); } };
   const fetchVid = async id => { const r = await fetch(`/api/videos/${id}/file`, { headers: { authorization: `Bearer ${token()}` } }); if (!r.ok) throw new Error('Could not load the video.'); return URL.createObjectURL(await r.blob()); };
   const playVid = async id => { try { setVPlay({ id, url: await fetchVid(id) }); } catch (x) { setVErr(x.message); } };
   const saveVid = async (id, name) => { try { const u = await fetchVid(id); const a = document.createElement('a'); a.href = u; a.download = `${(name || 'orbix-short').replace(/[^\w]+/g, '-').slice(0, 40)}.mp4`; a.click(); } catch (x) { setVErr(x.message); } };
@@ -222,7 +223,8 @@ export default function Hub({ user, dark, setDark, logout }) {
             <form onSubmit={makeVid} className="vid-form"><input value={vTopic} onChange={e => setVTopic(e.target.value)} placeholder="Topic, e.g. a haunted lighthouse" maxLength={200} disabled={!vids.enabled} /><button className="btn primary sm" disabled={!vids.enabled || vTopic.trim().length < 3 || activeVid}>Make video</button></form>
             <p className="hint">Orbix writes a short script with a voiceover, makes 4 vertical AI clips (9:16) and stitches them with the voice. It runs in the background, so you can leave. Free limits: 1 at a time, 4 a day, about 16 seconds in total.</p>
             {vErr && <div className="msg err" role="alert">{vErr}</div>}
-            <label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vLong} onChange={e => setVLong(e.target.checked)} disabled={!vids.enabled} /> Long story mode (about 2 minutes, a full story from start to end). Takes about 8 to 10 minutes to make.</label>
+            <label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vLong} onChange={e => setVLong(e.target.checked)} disabled={!vids.enabled} /> Long story mode (about 2 minutes, a full story from start to end). Takes about 8 to 10 minutes to make.</label><label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vLong} onChange={e => setVLong(e.target.checked)} disabled={!vids.enabled} /> Long story mode (about 2 minutes, a full story from start to end). Takes about 8 to 10 minutes to make.</label>
+            <label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vChar} onChange={e => setVChar(e.target.checked)} disabled={!vids.enabled} /> Same animated character in every scene (AI pictures, uses the free daily GPU time, so about one short video a day)</label>
             {vids.jobs.map(j => <div key={j.id} className="vid-card">
               <div className="vid-top"><b>{j.title || j.topic}</b><span className={`vid-st st-${j.status}`}>{{ queued: 'Waiting', scripting: 'Writing script', clips: `Clips ${j.scenes.filter(x => x === 'ok').length}/${j.scenes.length || '?'}`, stitching: 'Stitching', done: 'Ready', failed: 'Failed' }[j.status]}</span></div>
               {!['done', 'failed'].includes(j.status) && <><div className="vid-bar"><i style={{ width: `${Math.max(3, j.pct || 0)}%` }} /></div><p className="hint">{j.stage || 'Working'} · {j.pct || 0}%{j.etaSec ? ` · about ${Math.max(1, Math.round(j.etaSec / 60))} min left` : ''}</p></>}
