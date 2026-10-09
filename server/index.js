@@ -16,7 +16,7 @@ import { sendMail } from './mail.js';
 import { assertPublicUrl } from './ssrf.js';
 import * as mcp from './mcp.js';
 import { runAgent } from './agent.js';
-import { generateImage, imageEnabled } from './media.js';
+import { generateImage, imageEnabled, generateClip } from './media.js';
 import { Doc, Chunk, addDocument, hasDocs, LIMITS } from './rag.js';
 import { chatCompletion } from './llm.js';
 
@@ -310,6 +310,16 @@ app.get('/api/health/image', wrap(async (q, r) => {
   try { const url = await generateImage({ prompt: 'a small red circle on white background', width: 256, height: 256 }); const img = await fetch(url, { signal: AbortSignal.timeout(20000) }); v = { ok: img.ok && /^image\//.test(img.headers.get('content-type') || ''), configured: true, ms: Date.now() - t, type: img.headers.get('content-type') }; }
   catch (e) { v = { ok: false, configured: true, ms: Date.now() - t, error: String(e.message).slice(0, 140) }; }
   imgHealth = { at: Date.now(), v }; r.json(v);
+}));
+let vidHealth = { at: 0 };
+app.get('/api/health/video', wrap(async (q, r) => {
+  if (!imageEnabled()) return r.json({ ok: false, configured: false });
+  if (Date.now() - vidHealth.at < 900000) return r.json(vidHealth.v);
+  vidHealth = { at: Date.now(), v: { ok: null, running: true } }; r.json({ running: true, note: 'probe started, ask again in ~2 minutes' });
+  const t = Date.now(); let v;
+  try { const url = await generateClip({ prompt: 'a red balloon floating up in a blue sky', seconds: 2 }); const f = await fetch(url, { signal: AbortSignal.timeout(60000) }); const len = Number(f.headers.get('content-length') || 0) || (await f.arrayBuffer()).byteLength; v = { ok: f.ok && /video/.test(f.headers.get('content-type') || ''), ms: Date.now() - t, type: f.headers.get('content-type'), bytes: len }; }
+  catch (e) { v = { ok: false, ms: Date.now() - t, error: String(e.message).slice(0, 140) }; }
+  vidHealth = { at: Date.now(), v };
 }));
 // ---------- Orbi, the guide mascot ----------
 const mascotLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 40, keyGenerator: q => String(q.user?._id || q.ip), standardHeaders: true, legacyHeaders: false, validate: false, message: { error: 'Orbi needs a short break. Try again later.' } });
