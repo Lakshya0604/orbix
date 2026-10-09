@@ -85,7 +85,7 @@ export default function Hub({ user, dark, setDark, logout }) {
     if (f.size > 25 * 1024 * 1024) { say('File is over 25 MB.'); return; }
     if (/\.(png|jpe?g|webp|gif|heic|mp4|mov|webm)$/i.test(f.name) || /^(image|video)\//.test(f.type)) { say('Photos and videos cannot be read yet. Upload a PDF, DOCX, TXT, MD or CSV.'); return; }
     setUpBusy(true);
-    try { const r = await fetch(`/api/docs?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token()}` }, body: f }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Upload failed'); setLastDoc({ name: j.name, chunks: j.chunks }); say(`${j.name} added (${j.chunks} parts)`); loadDocs(); } catch (x) { say(x.message); }
+    try { const r = await fetch(`/api/docs?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token()}` }, body: f }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Upload failed'); setLastDoc({ name: j.name, chunks: j.chunks }); say(`${j.name} added (${j.chunks} parts)`); loadDocs(); } catch (x) { setLastDoc({ error: x.message }); say(x.message); }
     setUpBusy(false);
   };
   const soon = what => { setAttach(false); say(`${what} understanding is coming in the next update. Documents work now.`); };
@@ -262,7 +262,7 @@ export default function Hub({ user, dark, setDark, logout }) {
             {live && <div className="msg assistant"><Steps steps={live.steps} live /><div className="typing"><span /><span /><span /><em>{live.status}</em></div></div>}
             <div ref={bottom} />
           </div>
-          {lastDoc && <div className="doc-chip"><span>📄 <b>{lastDoc.name}</b> ready · {lastDoc.chunks} parts. Ask a question about it.</span><button type="button" className="x" onClick={() => setLastDoc(null)} aria-label="Dismiss">×</button></div>}
+          {lastDoc && <div className="doc-chip" style={lastDoc.error ? { borderColor: '#e5484d' } : undefined}><span>{lastDoc.error ? <>⚠️ Upload failed: {lastDoc.error}</> : <>📄 <b>{lastDoc.name}</b> ready · {lastDoc.chunks} parts. Ask a question about it.</>}</span><button type="button" className="x" onClick={() => setLastDoc(null)} aria-label="Dismiss">×</button></div>}
           <input ref={fileRef} type="file" hidden accept=".pdf,.docx,.txt,.md,.csv,.json,.html,.log" onChange={upload} />
           <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
             <div className="attach">
