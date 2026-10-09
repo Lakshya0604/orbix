@@ -31,12 +31,12 @@ export async function generateImage({ prompt, width, height }) {
 
 // Short text-to-video clips through the LTX-Video distilled Space (free ZeroGPU quota of the owner's HF account).
 const VSPACE = 'https://lightricks-ltx-video-distilled.hf.space';
-export async function generateClip({ prompt, seconds = 2, width = 704, height = 512 }) {
+export async function generateClip({ prompt, seconds = 2, width = 704, height = 512, waitMs = 240000 }) {
   const text = String(prompt || '').trim().slice(0, 500);
   if (!text) throw new Error('No prompt given.');
   const dur = Math.min(4, Math.max(1, Number(seconds) || 2));
   const data = [text, 'worst quality, inconsistent motion, blurry, jittery, distorted', null, null, height, width, 'text-to-video', dur, 9, 42, true, 1, true];
-  const out = await callSpace(VSPACE, 'text_to_video', data, { waitMs: 240000 });
+  const out = await callSpace(VSPACE, 'text_to_video', data, { waitMs });
   const url = out?.[0]?.video?.url || out?.[0]?.url;
   if (!/^https:\/\/[a-z0-9.-]+\.hf\.space\//.test(url || '')) throw new Error('The video service returned no clip.');
   return url;
