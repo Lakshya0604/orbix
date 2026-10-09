@@ -6,6 +6,7 @@ import Share from './Share.jsx';
 import Mascot from './Mascot.jsx';
 import Loader from './Loader.jsx';
 const Hub = lazy(() => import('./Hub.jsx'));
+const Stats = lazy(() => import('./Stats.jsx'));
 
 const parse = () => { const h = window.location.hash.replace(/^#/, '') || '/'; const [path, qs] = h.split('?'); return { path, q: new URLSearchParams(qs || '') }; };
 function Inner({ setUserOut }) {
@@ -18,13 +19,15 @@ function Inner({ setUserOut }) {
   useEffect(() => { const f = () => { setUser(null); location.hash = '#/login'; }; window.addEventListener('orbix-logout', f); return () => window.removeEventListener('orbix-logout', f); }, []);
   // Google callback hands the session token over in the URL fragment
   useEffect(() => { if (route.path === '/auth' && route.q.get('token')) { setToken(route.q.get('token')); history.replaceState(null, '', '#/'); setRoute(parse()); } }, [route]);
-  useEffect(() => { (async () => { if (token()) { try { setUser((await api('/api/auth/me')).user); } catch { setToken(null); } } setReady(true); })(); }, [route.path === '/auth']);
+  useEffect(() => { (async () => { if (token()) { try { const me = await api('/api/auth/me'); if (me.token) setToken(me.token); setUser(me.user); } catch { setToken(null); } } setReady(true); })(); }, [route.path === '/auth']);
   const signedIn = (res) => { setToken(res.token); setUser(res.user); location.hash = '#/'; };
   const logout = () => { setToken(null); setUser(null); location.hash = '#/login'; };
   const [gbusy, setGbusy] = useState(false); const [gerr, setGerr] = useState('');
   const guest = async () => { setGbusy(true); setGerr(''); try { signedIn(await api('/api/auth/guest', { method: 'POST' })); } catch (e) { setGerr(e.message); } setGbusy(false); };
+  useEffect(() => { if (!ready || route.path.startsWith('/auth')) return; const k = 'orbix_t_' + route.path; if (sessionStorage.getItem(k)) return; sessionStorage.setItem(k, '1'); fetch('/api/track', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: route.path || '/', ref: document.referrer }), keepalive: true }).catch(() => {}); }, [ready, route.path]);
   if (!ready) return <Loader />;
   if (route.path.startsWith('/s/')) return <Share id={route.path.slice(3)} dark={dark} setDark={setDark} />;
+  if (user && route.path === '/stats') return <Suspense fallback={<Loader label="Loading stats…" />}><Stats dark={dark} setDark={setDark} /></Suspense>;
   const inApp = user && !['/login', '/signup', '/forgot', '/reset'].includes(route.path);
   if (inApp) return <Suspense fallback={<Loader label="Opening your workspace…" />}><Hub user={user} dark={dark} setDark={setDark} logout={logout} /></Suspense>;
   if (!user && ['/', '', '/auth'].includes(route.path)) return <><Landing dark={dark} setDark={setDark} onGuest={guest} busy={gbusy} err={gerr} />{gbusy && <Loader label="Setting up your demo and connecting servers…" />}</>;
