@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { api } from './api.js';
-import Orbit3D from './Orbit3D.jsx';
+const Orbit3D = lazy(() => import('./Orbit3D.jsx')); // three.js loads after first paint so the page shows up fast
 import Tilt from './Tilt.jsx';
 
 const FEATURES = [
@@ -38,7 +38,7 @@ export default function Landing({ dark, setDark, onGuest, busy, err }) {
           {err && <div className="msg err">{err}</div>}
         </div>
         <motion.div className="lart" initial={{ opacity: 0, scale: .9 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 1, ease: [.22, 1, .36, 1] }}>
-          <Orbit3D dark={dark} count={8} />
+          <Suspense fallback={null}><Orbit3D dark={dark} count={8} /></Suspense>
           <Tilt className="float-card fc1" max={14}><span className="pulse connected" /> DeepWiki <em>connected</em></Tilt>
           <Tilt className="float-card fc2" max={14}>▶ text-to-video <em>2.1s</em></Tilt>
           <Tilt className="float-card fc3" max={14}>⬇ balloon.mp4 <em>ready</em></Tilt>
