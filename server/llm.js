@@ -60,3 +60,26 @@ export async function chatCompletion({ messages, tools }) {
   }
   throw new Error('The AI model is busy right now. Try again in a moment.');
 }
+
+// Photo and video understanding through Groq's free vision models (images only, small request).
+const VISION = [process.env.GROQ_VISION_MODEL, 'meta-llama/llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct'].filter(Boolean);
+export async function visionDescribe(images, ask, { frames = false } = {}) {
+  const key = process.env.GROQ_API_KEY; if (!key) throw new Error('The AI model is not configured on this server.');
+  const imgs = (images || []).filter(u => /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(u)).slice(0, 4); if (!imgs.length) throw new Error('No readable picture was sent.');
+  const instr = `${frames ? 'These are frames from one short video, in order. ' : ''}Describe what you see in detail (subjects, setting, colors, style, any motion or story). Copy any visible text exactly. Then answer the user's question if there is one.${ask ? ` User question: ${String(ask).slice(0, 300)}` : ''}`;
+  const errs = [];
+  for (const model of VISION) {
+    const r = await fetch(URL_, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` }, body: JSON.stringify({ model, temperature: 0.2, max_tokens: 700, messages: [{ role: 'user', content: [{ type: 'text', text: instr }, ...imgs.map(u => ({ type: 'image_url', image_url: { url: u } }))] }] }), signal: AbortSignal.timeout(60000) }).catch(e => ({ ok: false, status: 0, json: async () => ({ error: { message: e.message } }) }));
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.choices?.[0]?.message?.content) return String(j.choices[0].message.content).slice(0, 2500);
+    errs.push(`${model.split('/').pop()}: ${String(j?.error?.message || r.status).slice(0, 90)}`);
+  }
+  throw new Error(`Picture understanding is not available right now (${errs.join(' | ')}).`);
+}
+
+// Cross-chat memory: a short rolling summary per user, updated in the background and injected into new chats.
+const SECRET = /(sk-[\w-]{12,}|gsk_[\w]{10,}|hf_[\w]{10,}|ghp_[\w]{10,}|eyJ[\w-]{20,}|\b\d{12,19}\b|password\s*[:=]\s*\S+)/gi;
+export async function updateMemory(old, userText, answer) {
+  const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: 'You maintain a SHORT memory about a user of a chat app, to help in future chats. Input: current memory and the latest exchange. Output ONLY the updated memory as up to 8 short bullet lines (max 650 characters total): stable facts about the user (name, language, job, projects, goals), their preferences, and ongoing topics. Drop trivia and one-off questions. NEVER store passwords, keys, tokens, card or ID numbers, or health or political details. If nothing new is worth keeping, return the current memory unchanged.' }, { role: 'user', content: `CURRENT MEMORY:\n${old || '(empty)'}\n\nLATEST EXCHANGE:\nUser: ${String(userText).slice(0, 600)}\nAssistant: ${String(answer).slice(0, 500)}` }] });
+  return String(m.content || '').replace(SECRET, '[hidden]').trim().slice(0, 700);
+}
