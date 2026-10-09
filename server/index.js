@@ -16,9 +16,11 @@ import { sendMail } from './mail.js';
 import { assertPublicUrl } from './ssrf.js';
 import * as mcp from './mcp.js';
 import { runAgent } from './agent.js';
+import { Doc, Chunk, addDocument, hasDocs, LIMITS } from './rag.js';
 import { chatCompletion } from './llm.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+process.on('unhandledRejection', e => console.error('unhandled rejection:', String(e?.message || e).slice(0, 200)));
 const app = express();
 app.set('trust proxy', 1);
 const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? null : 'dev-secret');
@@ -289,7 +291,7 @@ app.post('/api/chat', auth, chatLimiter, wrap(async (q, r) => {
   try {
     const servers = await ensureConnected(q.user._id);
     const ask = id => new Promise(res => { const k = `${q.user._id}:${id}`; const t = setTimeout(() => { pending.delete(k); res(false); }, 120000); pending.set(k, v => { clearTimeout(t); pending.delete(k); res(v); }); });
-    const { text: answer, steps } = await runAgent({ userId: q.user._id, servers, history: chat.messages, userText: text, emit, ask, signal: ctrl.signal });
+    const { text: answer, steps } = await runAgent({ userId: q.user._id, servers, history: chat.messages, userText: text, emit, ask, signal: ctrl.signal, hasDocs: !!(await hasDocs(q.user._id)) });
     chat.messages.push({ role: 'user', content: text }, { role: 'assistant', content: answer, steps }); chat.markModified('messages'); await chat.save();
     emit({ type: 'answer', text: answer });
   } catch (e) { emit({ type: 'error', message: String(e.message || e).slice(0, 240) }); }
@@ -326,6 +328,15 @@ const makeOg = () => {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ih), chunk('IDAT', zlib.deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0))]);
 };
 app.get('/og.png', (_q, r) => { ogPng ||= makeOg(); r.set({ 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' }).send(ogPng); });
+// ---------- documents (RAG) ----------
+const docLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 20, keyGenerator: q => String(q.user?._id || q.ip), standardHeaders: true, legacyHeaders: false, validate: { keyGeneratorIpFallback: false }, message: { error: 'Too many uploads this hour. Try again later.' } });
+app.get('/api/docs', auth, wrap(async (q, r) => r.json((await Doc.find({ userId: q.user._id }).sort('-createdAt')).map(d => ({ id: String(d._id), name: d.name, kind: d.kind, chunks: d.chunks, chars: d.chars, at: d.createdAt })))));
+app.post('/api/docs', auth, docLimiter, express.raw({ type: () => true, limit: LIMITS.fileBytes }), wrap(async (q, r) => {
+  if (!Buffer.isBuffer(q.body) || !q.body.length) throw bad('Choose a file to upload.');
+  const d = await addDocument(q.user._id, String(q.query.name || 'document').slice(0, 120), q.body);
+  r.status(201).json({ id: String(d._id), name: d.name, chunks: d.chunks });
+}));
+app.delete('/api/docs/:id', auth, wrap(async (q, r) => { await Promise.all([Doc.deleteOne({ _id: q.params.id, userId: q.user._id }), Chunk.deleteMany({ docId: q.params.id, userId: q.user._id })]); r.json({ ok: true }); }));
 // ---------- static client ----------
 const dist = path.join(__dirname, '../client/dist');
 if (fs.existsSync(dist)) { app.use(express.static(dist, { maxAge: '1h', setHeaders: (res, f) => { if (/[\\/]assets[\\/]/.test(f)) res.setHeader('cache-control', 'public, max-age=31536000, immutable'); else if (/\.html$/.test(f)) res.setHeader('cache-control', 'no-cache'); } })); app.get(/^(?!\/api).*/, (_q, r) => r.sendFile(path.join(dist, 'index.html'))); }
