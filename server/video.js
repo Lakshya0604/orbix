@@ -47,7 +47,7 @@ async function fontsDir() {
 const assTime = t => { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), sec = (t % 60).toFixed(2).padStart(5, '0'); return `${h}:${String(m).padStart(2, '0')}:${sec}`; };
 function assFile(text, a, b) {
   const dev = /[\u0900-\u097F]/.test(text); const clean = String(text).replace(/[{}\\]/g, '').replace(/\s+/g, ' ').trim();
-  return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Default,${dev ? 'Noto Sans Devanagari' : 'Noto Sans'},34,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,24,24,110,1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\nDialogue: 0,${assTime(a)},${assTime(b)},Default,,0,0,0,,${clean}\n`;
+  return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Default,${dev ? 'Noto Sans Devanagari' : 'Noto Sans'},40,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,24,24,110,1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\nDialogue: 0,${assTime(a)},${assTime(b)},Default,,0,0,0,,${clean}\n`;
 }
 async function lyricScript(job) {
   let song = null; for (let k = 0; k < 8 && !song; k++) { song = await VideoBlob.findOne({ jobId: job._id, kind: 'song' }); if (!song) await new Promise(r => setTimeout(r, 2500)); } if (!song) throw new Error('The song file is missing.');
@@ -90,9 +90,9 @@ async function script(job) {
     const plan = [['intro', 3], ['buildup', 3], ['twist', 2], ['climax', 3], ['ending', 3]]; const acc = [];
     for (const [act, n] of plan) {
       let got = null, why = '';
-      for (let t = 0; t < 5 && !got; t++) {
+      for (let t = 0; t < 8 && !got; t++) {
         job.stage = `Writing the story: ${act}`; await job.save().catch(() => {});
-        let m; try { m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: sysFor(n, `\nStory plan:\n${outline}\nWrite ONLY the "${act}" part now: exactly ${n} scenes, all with act "${act}".${acc.length ? `\nNarration so far (continue straight from it):\n${acc.map(x => x.say).join(' ')}` : ''}`) }, { role: 'user', content: `Topic: ${job.topic}` }] }); } catch (e) { why = 'llm: ' + String(e.message).slice(0, 120); await new Promise(r => setTimeout(r, 6000)); continue; }
+        let m; try { m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: sysFor(n, `\nStory plan:\n${outline}\nWrite ONLY the "${act}" part now: exactly ${n} scenes, all with act "${act}".${acc.length ? `\nNarration so far (continue straight from it):\n${acc.map(x => x.say).join(' ')}` : ''}`) }, { role: 'user', content: `Topic: ${job.topic}` }] }); } catch (e) { why = 'llm: ' + String(e.message).slice(0, 120); await new Promise(r => setTimeout(r, 10000 * (t + 1))); continue; }
         const x = jsonOf(m.content); if (x && Array.isArray(x.scenes) && x.scenes.length >= 1) got = x.scenes.slice(0, n); else why = 'parse: ' + String(m.content || '').replace(/\s+/g, ' ').slice(0, 160) + ' ...' + String(m.content || '').replace(/\s+/g, ' ').slice(-60);
       }
       if (!got) throw new Error('The script came back broken. Try again. [' + why + ']');
