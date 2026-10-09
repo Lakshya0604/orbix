@@ -52,3 +52,20 @@ export async function generateSpeech({ text, hindi = false }) {
   if (!/^https:\/\/[a-z0-9.-]+\.hf\.space\//.test(url || '')) throw new Error('The voice service returned no audio.');
   return url;
 }
+
+// Agnes AI video API (free "$0 / second" tier, 1 request per minute for free keys). Async: create a task, poll until completed.
+export async function generateAgnesClip({ prompt, frames = 97, fps = 24, width = 576, height = 1024 }) {
+  const key = process.env.AGNES_API_KEY; if (!key) throw new Error('No Agnes key set.');
+  const H = { authorization: `Bearer ${key}`, 'content-type': 'application/json' };
+  const r = await fetch('https://apihub.agnes-ai.com/v1/videos', { method: 'POST', headers: H, body: JSON.stringify({ model: 'agnes-video-v2.0', prompt: String(prompt).slice(0, 500), width, height, num_frames: frames, frame_rate: fps }), signal: AbortSignal.timeout(30000) });
+  const t = await r.text(); if (!r.ok) throw new Error(`Agnes HTTP ${r.status} ${t.replace(/\s+/g, ' ').slice(0, 120)}`);
+  const j = JSON.parse(t); const id = j.video_id || j.task_id || j.id; if (!id) throw new Error('Agnes returned no task id.');
+  const end = Date.now() + 240000;
+  while (Date.now() < end) {
+    await new Promise(x => setTimeout(x, 6000));
+    const g = await fetch(`https://apihub.agnes-ai.com/agnesapi?video_id=${encodeURIComponent(id)}`, { headers: H, signal: AbortSignal.timeout(20000) }); const gj = await g.json().catch(() => ({}));
+    if (gj.status === 'completed' && gj.metadata?.url) return { url: gj.metadata.url, seconds: gj.seconds, size: gj.size };
+    if (['failed', 'error', 'cancelled'].includes(gj.status)) throw new Error(`Agnes task ${gj.status}: ${JSON.stringify(gj.error || '').slice(0, 100)}`);
+  }
+  throw new Error('Agnes took too long.');
+}
