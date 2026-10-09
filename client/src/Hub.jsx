@@ -1,0 +1,201 @@
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { api, stream } from './api.js';
+import Tilt from './Tilt.jsx';
+import Orbit3D from './Orbit3D.jsx';
+import { orbi, orbiContext } from './Mascot.jsx';
+import { Answer, Steps, saveText } from './parts.jsx';
+
+const SUGGEST = [
+  'Make a 2 second video of a red balloon floating over a lake at sunrise',
+  'Explain how React Server Components work in the facebook/react repo',
+  'Search the web for the latest on the Model Context Protocol and summarise it',
+  'What is the current price of bitcoin and ethereum?',
+];
+function ServerCard({ s, onReconnect, onRemove, onToggle }) {
+  const label = { connected: 'Connected', connecting: 'Connecting…', error: 'Not working', disconnected: 'Offline' }[s.state];
+  return (
+    <motion.div layout className={`srv ${s.state}`} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }}>
+      <div className="srv-top"><span className={`pulse ${s.state}`} /><b>{s.name}</b><span className="srv-state">{label}</span></div>
+      <div className="srv-meta">{s.state === 'connected' ? `${s.toolCount} tools · ${s.latencyMs} ms` : s.error || 'Not connected'}{s.hasKey ? ' · key set' : ''}</div>
+      {s.catalogId && s.state === 'connected' && catalog.servers.find(c => c.id === s.catalogId)?.examples?.[0] && <button className="try" onClick={() => { send(catalog.servers.find(c => c.id === s.catalogId).examples[0]); setDrawer(false); }}>▸ {catalog.servers.find(c => c.id === s.catalogId).examples[0]}</button>}
+        <div className="srv-actions">
+        <button className="chip" onClick={() => onReconnect(s)}>{s.state === 'connected' ? 'Refresh' : 'Reconnect'}</button>
+        <button className="chip" onClick={() => onToggle(s)}>{s.enabled ? 'Pause' : 'Resume'}</button>
+        <button className="chip danger" onClick={() => onRemove(s)}>Remove</button>
+      </div>
+    </motion.div>
+  );
+}
+
+export default function Hub({ user, dark, setDark, logout }) {
+  const [servers, setServers] = useState([]);
+  const [catalog, setCatalog] = useState({ servers: [], rejected: [] });
+  const [health, setHealth] = useState({});
+  const [chats, setChats] = useState([]);
+  const [chatId, setChatId] = useState(null);
+  const [msgs, setMsgs] = useState([]);
+  const [live, setLive] = useState(null); // {steps, status}
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [drawer, setDrawer] = useState(false);
+  const [toast, setToast] = useState('');
+  const [custom, setCustom] = useState({ name: '', url: '', apiKey: '', open: false });
+  const [approval, setApproval] = useState(null);
+  const [checking, setChecking] = useState(false);
+  const [left, setLeft] = useState(user.guestLeft);
+  const [shareUrl, setShareUrl] = useState('');
+  const bottom = useRef(null); const abort = useRef(null);
+  const say = m => { setToast(m); setTimeout(() => setToast(''), 4000); };
+
+  const prevStates = useRef({});
+  useEffect(() => {
+    const names = servers.filter(s => s.state === 'connected').map(s => s.name);
+    orbiContext.value = `User: ${user.guest ? 'guest (demo)' : 'signed in'}. Connected servers: ${names.join(', ') || 'none'}. Not working: ${servers.filter(s => s.state === 'error').map(s => s.name).join(', ') || 'none'}. Busy: ${busy}. Guest tasks left: ${left ?? 'n/a'}.`;
+    servers.forEach(s => { const p = prevStates.current[s.id]; if (p && p !== s.state) { if (s.state === 'connected') orbi('happy', `${s.name} is live with ${s.toolCount} tools!`); if (s.state === 'error') orbi('worried', `${s.name} is not responding: ${s.error || 'unknown error'}. Try Reconnect.`, 8000); } prevStates.current[s.id] = s.state; });
+  }, [servers, busy, left, user]);
+  useEffect(() => { const t = setTimeout(() => orbi('wave', user.guest ? `Hi! This is the demo, you get ${user.guestLeft} free tasks. Tap an example below.` : `Hey ${user.name.split(' ')[0]}! Pick an example or ask for anything.`, 7000), 900); return () => clearTimeout(t); }, []);
+  useEffect(() => { if (busy) orbi('thinking', 'Working on it…', 60000); }, [busy]);
+  const loadServers = useCallback(async () => setServers(await api('/api/servers')), []);
+  const loadChats = useCallback(async () => setChats(await api('/api/chats')), []);
+  useEffect(() => { loadServers(); loadChats(); api('/api/catalog').then(setCatalog); api('/api/servers/reconnect-all', { method: 'POST' }).catch(() => {}); }, [loadServers, loadChats]);
+  // live status stream for the left panel
+  useEffect(() => {
+    const ctrl = new AbortController(); let stop = false;
+    (async () => { while (!stop) { try { await stream('/api/events', { onEvent: ev => setServers(list => list.map(s => s.id === ev.id ? { ...s, ...ev } : s)), signal: ctrl.signal }); } catch {} if (!stop) await new Promise(r => setTimeout(r, 3000)); } })();
+    return () => { stop = true; ctrl.abort(); };
+  }, []);
+  useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [msgs, live]);
+
+  const addCatalog = async c => { try { await api('/api/servers', { method: 'POST', body: { catalogId: c.id } }); await loadServers(); } catch (e) { say(e.message); } };
+  const connectAllFree = async () => { orbi('happy', 'Connecting all the free servers…', 4000); for (const c of catalog.servers.filter(c => c.auth === 'none' && !servers.some(s => s.catalogId === c.id))) await addCatalog(c); };
+  const addCustom = async e => { e.preventDefault(); try { await api('/api/servers', { method: 'POST', body: { name: custom.name, url: custom.url, apiKey: custom.apiKey || undefined } }); setCustom({ name: '', url: '', apiKey: '', open: false }); await loadServers(); } catch (x) { say(x.message); } };
+  const reconnect = async s => { setServers(l => l.map(x => x.id === s.id ? { ...x, state: 'connecting' } : x)); try { await api(`/api/servers/${s.id}/connect`, { method: 'POST' }); } catch (e) { say(e.message); } loadServers(); };
+  const remove = async s => { await api(`/api/servers/${s.id}`, { method: 'DELETE' }); loadServers(); };
+  const toggle = async s => { await api(`/api/servers/${s.id}`, { method: 'PATCH', body: { enabled: !s.enabled } }); loadServers(); };
+  const checkHealth = async (force) => { setChecking(true); try { const r = await api(`/api/catalog/health${force ? '?force=1' : ''}`); setHealth(Object.fromEntries(r.map(x => [x.id, x]))); } catch (e) { say(e.message); } setChecking(false); };
+
+  const share = async () => { try { const r = await api(`/api/chats/${chatId}/share`, { method: 'POST' }); setShareUrl(r.url); try { await navigator.clipboard.writeText(r.url); say('Share link copied'); } catch { say('Share link ready below'); } } catch (e) { say(e.message); } };
+  const openChat = async id => { setShareUrl(''); setChatId(id); setDrawer(false); setMsgs((await api(`/api/chats/${id}`)).messages); };
+  const newChat = () => { setShareUrl(''); setChatId(null); setMsgs([]); setDrawer(false); };
+  const deleteChat = async id => { await api(`/api/chats/${id}`, { method: 'DELETE' }); if (id === chatId) newChat(); loadChats(); };
+
+  async function send(t) {
+    const message = (t ?? text).trim(); if (!message || busy) return;
+    if (user.guest && left <= 0) { say('Demo finished. Create a free account to keep going.'); return; }
+    setText(''); setBusy(true); if (user.guest) setLeft(l => l - 1); setMsgs(m => [...m, { role: 'user', content: message }]); setLive({ steps: [], status: 'Thinking…' });
+    const ctrl = new AbortController(); abort.current = ctrl; let steps = [], answer = '', err = '';
+    try {
+      await stream('/api/chat', { method: 'POST', body: { chatId, message }, signal: ctrl.signal, onEvent: ev => {
+        if (ev.type === 'chat') setChatId(ev.id);
+        else if (ev.type === 'thinking') setLive(l => ({ ...l, status: 'Thinking…' }));
+        else if (ev.type === 'tool_call') { steps = [...steps, { id: ev.id, server: ev.server, tool: ev.tool, status: 'running' }]; setLive({ steps, status: `Using ${ev.server}…` }); }
+        else if (ev.type === 'approval') setApproval(ev);
+        else if (ev.type === 'tool_result') { steps = steps.map(s => s.id === ev.id ? { ...s, status: ev.status, ms: ev.ms, preview: ev.preview, media: ev.media } : s); setLive({ steps, status: 'Thinking…' }); }
+        else if (ev.type === 'answer') answer = ev.text;
+        else if (ev.type === 'error') err = ev.message;
+      } });
+    } catch (e) { if (e.name !== 'AbortError') err = e.message; }
+    setApproval(null); orbi(err ? 'worried' : 'happy', err ? 'That did not work. Try rephrasing, or check the server dots on the left.' : (/\.(mp4|webm|png|jpe?g|webp|gif)/i.test(answer) ? 'Your file is ready. Tap Download under it!' : 'Done! Want me to suggest a follow-up?'), 7000);
+    const mediaFromSteps = [...new Set(steps.flatMap(s => s.media || []))].filter(u => !answer.includes(u));
+    setMsgs(m => [...m, { role: 'assistant', content: err ? `Something went wrong: ${err}` : answer + (mediaFromSteps.length ? '\n\n' + mediaFromSteps.join('\n') : ''), steps, error: !!err }]);
+    setLive(null); setBusy(false); loadChats();
+  }
+  const decide = async allow => { const a = approval; setApproval(null); await api('/api/approve', { method: 'POST', body: { id: a.id, allow } }); };
+
+  const connectedCount = servers.filter(s => s.state === 'connected').length;
+  const freeLeft = catalog.servers.filter(c => c.auth === 'none' && !servers.some(s => s.catalogId === c.id)).length;
+
+  return (
+    <div className="hub">
+      <header className="topbar">
+        <button className="icon-btn menu" onClick={() => setDrawer(!drawer)} aria-label="Servers and chats">☰</button>
+        <div className="brand"><span className="logo-dot" />Orbix</div>
+        <div className="grow" />
+        <span className="live-pill"><span className="pulse connected" />{connectedCount} live</span>
+        <button className="icon-btn" onClick={() => setDark(!dark)} aria-label="Toggle dark mode">{dark ? '☀' : '☾'}</button>
+        {user.guest && <a className="chip accent" href="#/signup" onClick={logout}>Create account</a>}
+        <div className="user"><span>{user.name}</span><button className="chip" onClick={logout}>{user.guest ? 'Exit demo' : 'Log out'}</button></div>
+      </header>
+
+      <div className="layout">
+        <aside className={`side ${drawer ? 'open' : ''}`}>
+          <section>
+            <div className="side-h"><h3>Your servers</h3>{freeLeft > 0 && <button className="chip accent" onClick={connectAllFree}>Connect all free ({freeLeft})</button>}</div>
+            <AnimatePresence initial={false}>{servers.map(s => <ServerCard key={s.id} s={s} onReconnect={reconnect} onRemove={remove} onToggle={toggle} />)}</AnimatePresence>
+            {!servers.length && <p className="empty">Nothing connected yet. Pick a server below, or press “Connect all free”.</p>}
+          </section>
+          <section>
+            <div className="side-h"><h3>Catalog</h3><button className="chip" onClick={() => checkHealth(true)} disabled={checking}>{checking ? 'Checking…' : 'Check health'}</button></div>
+            <p className="hint">Only servers that passed a real connection test are listed.</p>
+            {catalog.servers.map(c => {
+              const h = health[c.id]; const added = servers.some(s => s.catalogId === c.id);
+              return (
+                <div key={c.id} className="cat">
+                  <div className="cat-top"><b>{c.name}</b>
+                    <span className={`badge ${c.auth === 'none' ? 'free' : 'key'}`}>{c.auth === 'none' ? 'Free · no key' : 'Needs key'}</span></div>
+                  <p>{c.description}</p>
+                  {added && c.examples?.slice(0, 2).map(x => <button key={x} className="try" onClick={() => { send(x); setDrawer(false); }}>▸ {x}</button>)}
+                  <div className="cat-foot">
+                    <span className={`health ${h ? (h.ok ? 'up' : 'down') : 'unk'}`}>{h ? (h.ok ? `Working · ${h.latencyMs} ms` : `Not working: ${h.error}`) : `Tested ${c.testedAt}`}</span>
+                    {added ? <span className="added">✓ Added</span> : <button className="chip primary" onClick={() => addCatalog(c)}>Connect</button>}
+                  </div>
+                </div>
+              );
+            })}
+            <button className="chip block" onClick={() => setCustom({ ...custom, open: !custom.open })}>{custom.open ? 'Close' : '+ Add any server by URL'}</button>
+            {custom.open && <form className="custom" onSubmit={addCustom}>
+              <input required placeholder="Name" value={custom.name} onChange={e => setCustom({ ...custom, name: e.target.value })} />
+              <input required placeholder="https://server.example.com/mcp" value={custom.url} onChange={e => setCustom({ ...custom, url: e.target.value })} />
+              <input placeholder="API key (optional, stored encrypted)" type="password" value={custom.apiKey} onChange={e => setCustom({ ...custom, apiKey: e.target.value })} />
+              <button className="btn primary sm">Connect</button>
+            </form>}
+          </section>
+          <section>
+            <div className="side-h"><h3>Chats</h3><button className="chip" onClick={newChat}>+ New</button></div>
+            {chats.map(c => <div key={c.id} className={`chat-row ${c.id === chatId ? 'on' : ''}`}><button onClick={() => openChat(c.id)}>{c.title}</button><button className="x" onClick={() => deleteChat(c.id)} aria-label="Delete chat">×</button></div>)}
+          </section>
+        </aside>
+        {drawer && <div className="scrim" onClick={() => setDrawer(false)} />}
+
+        <main className="center">
+          {user.guest && <div className="guestbar">Demo mode · {left} free {left === 1 ? 'task' : 'tasks'} left · <a href="#/signup" onClick={logout}>Create a free account</a> for unlimited chats and your own servers</div>}
+          {chatId && !busy && msgs.length > 0 && !user.guest && <div className="sharebar"><button className="chip" onClick={share}>🔗 Share this chat</button>{shareUrl && <input readOnly value={shareUrl} onFocus={e => e.target.select()} />}</div>}
+          <div className="thread">
+            {!msgs.length && !live && (
+              <motion.div className="hero" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
+                <div className="hero3d"><Orbit3D dark={dark} count={6} /></div>
+                <h1>What should we get done, {user.name.split(' ')[0]}?</h1>
+                <p>Orbix picks the right tools from your {connectedCount} connected server{connectedCount === 1 ? '' : 's'} and shows every step. Anything it makes, you can download.</p>
+                <div className="sugg">{SUGGEST.map(s => <Tilt as="button" key={s} max={6} onClick={() => send(s)}>{s}</Tilt>)}</div>
+              </motion.div>
+            )}
+            {msgs.map((m, i) => (
+              <motion.div key={i} className={`msg ${m.role} ${m.error ? 'bad' : ''}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+                {m.role === 'user' ? <div className="bubble">{m.content}</div> : <>
+                  <Steps steps={m.steps} /><Answer text={m.content} onError={say} />
+                  {!m.error && <button className="chip" onClick={() => saveText(m.content, `orbix-answer-${i}.md`)}>⬇ Save answer</button>}
+                </>}
+              </motion.div>
+            ))}
+            {live && <div className="msg assistant"><Steps steps={live.steps} live /><div className="typing"><span /><span /><span /><em>{live.status}</em></div></div>}
+            <div ref={bottom} />
+          </div>
+          <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
+            <textarea rows={1} value={text} onChange={e => setText(e.target.value)} placeholder="Ask for anything your servers can do…" onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
+            {busy ? <button type="button" className="btn ghost" onClick={() => abort.current?.abort()}>Stop</button> : <button className="btn primary" disabled={!text.trim()}>Send</button>}
+          </form>
+        </main>
+      </div>
+
+      <AnimatePresence>{approval && <motion.div className="modal-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+        <motion.div className="modal" initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }}>
+          <h3>Allow this action?</h3>
+          <p><b>{approval.server}</b> wants to run <code>{approval.tool}</code>, which may change something.</p>
+          <pre>{JSON.stringify(approval.args, null, 2).slice(0, 600)}</pre>
+          <div className="row"><button className="btn ghost" onClick={() => decide(false)}>Deny</button><button className="btn primary" onClick={() => decide(true)}>Allow once</button></div>
+        </motion.div></motion.div>}</AnimatePresence>
+      <AnimatePresence>{toast && <motion.div className="toast" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
+    </div>
+  );
+}
