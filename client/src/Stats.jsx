@@ -21,6 +21,12 @@ export default function Stats({ dark, setDark }) {
           </div>
           <h3>Page views, last 30 days</h3>
           <div className="st-chart">{d.days.map(x => <div key={x.day} title={`${x.day}: ${x.views} views, ${x.visitors} visitors`} className="st-col"><i style={{ height: `${(x.views / max) * 100}%` }} /></div>)}</div>
+          <div className="st-cards">
+            <div className="st-card"><small>Sign-ups (30 days)</small><b>{d.auth.signups30d}</b><span>new accounts</span></div>
+            <div className="st-card"><small>Logins (30 days)</small><b>{d.auth.logins30d}</b><span>sign-ins</span></div>
+          </div>
+          <h3>Recent sign-ups and logins</h3>
+          {d.auth.recent.length ? <div className="st-bars">{d.auth.recent.map((e, i) => <div key={i} className="st-row"><span className="st-name" style={{ width: '46%' }}>{e.email || 'unknown'}</span><span style={{ flex: 1, opacity: .75, fontSize: 13 }}>{e.type === 'signup' ? '🆕 signed up' : 'logged in'} · {e.how}</span><small>{new Date(e.at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></div>)}</div> : <p className="hint">No sign-ups or logins recorded yet (tracking starts now).</p>}
           <h3>Top pages</h3><Bars rows={d.pages} empty="No visits yet." />
           <h3>Where visitors came from</h3><Bars rows={d.referrers} empty="No outside referrers yet (direct visits only)." />
           <h3>Devices</h3><Bars rows={d.devices} empty="No data yet." />
