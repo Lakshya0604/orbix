@@ -7,13 +7,13 @@ import os from 'node:os';
 import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 import { chatCompletion } from './llm.js';
-import { generateClip, generateSpeech, generateAgnesClip, generateImage, generateWithReference } from './media.js';
+import { generateClip, generateSpeech, generateAgnesClip, generateImage, generateWithReference, transcribeSong } from './media.js';
 const { Schema, model } = mongoose; const run = promisify(execFile);
 
 export const VideoJob = model('VideoJob', new Schema({
   userId: { type: Schema.Types.ObjectId, index: true }, topic: String, title: { type: String, default: '' },
   status: { type: String, default: 'queued', index: true }, // queued, scripting, clips, stitching, done, failed
-  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, charDesc: { type: String, default: '' }, stage: { type: String, default: '' }, startedAt: Date,
+  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, lyric: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, stage: { type: String, default: '' }, startedAt: Date,
   lockUntil: { type: Date, default: null }, bytes: { type: Number, default: 0 },
 }, { timestamps: true }));
 export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer }, { timestamps: true }));
@@ -28,6 +28,50 @@ export async function startJob(userId, topic, long = false, char = false) {
   return VideoJob.create({ userId, topic: t, long: !!long, char: !!char, startedAt: new Date() });
 }
 
+export async function startLyricJob(userId, title, buf) {
+  if (!buf?.length || buf.length < 20000) throw Object.assign(new Error('Send a song file (mp3, m4a or wav).'), { status: 400 });
+  if (buf.length > 14e6) throw Object.assign(new Error('Song file is too big. Use one under 14 MB.'), { status: 413 });
+  const job = await startJob(userId, String(title || 'Lyric video').slice(0, 120) || 'Lyric video', false);
+  job.lyric = true; await job.save(); await VideoBlob.create({ jobId: job._id, kind: 'song', idx: 0, data: buf }); return job;
+}
+export async function startLyricSelftest(userId) {
+  const r = await fetch('https://archive.org/download/HighlandBaptistChurchChoirAmazingGrace/Amazing_Grace_Acapella_vbr.mp3', { redirect: 'follow', signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Test song not reachable.');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-t-')); try { const a = path.join(dir, 'a.mp3'), b = path.join(dir, 'b.mp3'); await fs.writeFile(a, Buffer.from(await r.arrayBuffer())); await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', a, '-t', '36', '-b:a', '96k', b], { timeout: 60000 }); return await startLyricJob(userId, 'Amazing Grace (Highland Baptist Church Choir, CC BY 2.5)', await fs.readFile(b)); } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}
+const FONTS = { dev: 'https://github.com/notofonts/notofonts.github.io/raw/main/fonts/NotoSansDevanagari/hinted/ttf/NotoSansDevanagari-Bold.ttf', lat: 'https://github.com/notofonts/notofonts.github.io/raw/main/fonts/NotoSans/hinted/ttf/NotoSans-Bold.ttf' };
+async function fontsDir() {
+  const d = path.join(os.tmpdir(), 'orbix-fonts'); await fs.mkdir(d, { recursive: true });
+  for (const [k, u] of Object.entries(FONTS)) { const f = path.join(d, `${k}.ttf`); if (await fs.stat(f).then(x => x.size > 50000, () => false)) continue; const r = await fetch(u, { redirect: 'follow', signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Could not load the caption font.'); await fs.writeFile(f, Buffer.from(await r.arrayBuffer())); }
+  return d;
+}
+const assTime = t => { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), sec = (t % 60).toFixed(2).padStart(5, '0'); return `${h}:${String(m).padStart(2, '0')}:${sec}`; };
+function assFile(text, a, b) {
+  const dev = /[\u0900-\u097F]/.test(text); const clean = String(text).replace(/[{}\\]/g, '').replace(/\s+/g, ' ').trim();
+  return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Default,${dev ? 'Noto Sans Devanagari' : 'Noto Sans'},34,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,24,24,110,1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\nDialogue: 0,${assTime(a)},${assTime(b)},Default,,0,0,0,,${clean}\n`;
+}
+async function lyricScript(job) {
+  const song = await VideoBlob.findOne({ jobId: job._id, kind: 'song' }); if (!song) throw new Error('The song file is missing.');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-l-'));
+  try {
+    job.stage = 'Listening to the song'; await job.save();
+    const src = path.join(dir, 'song.bin'), small = path.join(dir, 'small.mp3'); await fs.writeFile(src, song.data);
+    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', src, '-t', '180', '-ac', '1', '-ar', '16000', '-b:a', '48k', small], { timeout: 90000 });
+    job.songDur = Math.min(180, await dur(small)); const { segments, language } = await transcribeSong(await fs.readFile(small));
+    if (!segments.length) throw new Error('I could not hear any lyrics in this song.');
+    const lines = []; for (const g of segments) { const last = lines[lines.length - 1]; if (last && (last.t1 - last.t0 < 3 || g.t1 - g.t0 < 1.5) && g.t0 - last.t1 < 1.5) { last.t1 = g.t1; last.text += ' ' + g.text; } else lines.push({ ...g }); }
+    const L = lines.slice(0, 30); job.stage = 'Planning the visuals'; await job.save();
+    let vis = [];
+    for (let i = 0; i < L.length; i += 10) {
+      const part = L.slice(i, i + 10); let got = null;
+      for (let t = 0; t < 3 && !got; t++) {
+        try { const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: `You are a music video director. For each lyric line (given as a numbered list) choose what the viewer should SEE. Reply with ONLY valid JSON: {"scenes":[{"kw":"phrase one|phrase two","shot":"..."}]} with exactly ${part.length} entries in the same order. "kw" is TWO stock-footage search phrases separated by a pipe, each 2 or 3 plain English words naming a visible real-world subject (never abstract words, never names), always English even if the lyrics are not. "shot" is one English sentence describing the visual. Keep one consistent mood across the whole song. No double quote characters inside values.` }, { role: 'user', content: `Song title: ${job.topic}\n${part.map((l, k) => `${k + 1}. ${l.text}`).join('\n')}` }] }); const x = jsonOf(m.content); if (x && Array.isArray(x.scenes) && x.scenes.length >= part.length) got = x.scenes.slice(0, part.length); } catch { await new Promise(r => setTimeout(r, 5000)); }
+      }
+      vis.push(...(got || part.map(() => ({ kw: `${job.topic.split(/\s+/).slice(0, 2).join(' ')}|nature sky`, shot: job.topic }))));
+    }
+    job.scenes = L.map((l, i) => ({ act: '', prompt: String(vis[i]?.shot || job.topic).slice(0, 300), kw: String(vis[i]?.kw || 'nature sky').replace(/[^\w |]/g, ' ').slice(0, 110).trim(), say: l.text.slice(0, 200), state: 'wait', tries: 0, t0: l.t0, t1: l.t1 }));
+    job.title = job.topic; job.status = 'clips'; job.stage = `Lyrics ready: ${L.length} lines (${language || 'language auto'})`; await job.save();
+  } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}
 const ARC = 'The scenes must be ONE connected story with a clear arc: a hook/intro that sets the character and place, a buildup that raises the stakes, a turn or twist, a climax, and a closing ending that pays off the start. Each scene continues directly from the previous one (same characters, same place, cause and effect), never a list of unrelated facts.';
 const jsonOf = t => { const m = String(t || '').match(/\{[\s\S]*\}/)?.[0] || ''; for (const v of [m, m.replace(/,\s*([}\]])/g, '$1'), m.replace(/[\u201c\u201d]/g, "'").replace(/,\s*([}\]])/g, '$1')]) { try { return JSON.parse(v); } catch {} } return null; };
 async function script(job) {
@@ -44,13 +88,13 @@ async function script(job) {
   if (job.long) {
     const plan = [['intro', 3], ['buildup', 3], ['twist', 2], ['climax', 3], ['ending', 3]]; const acc = [];
     for (const [act, n] of plan) {
-      let got = null;
+      let got = null, why = '';
       for (let t = 0; t < 5 && !got; t++) {
         job.stage = `Writing the story: ${act}`; await job.save().catch(() => {});
-        let m; try { m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: sysFor(n, `\nStory plan:\n${outline}\nWrite ONLY the "${act}" part now: exactly ${n} scenes, all with act "${act}".${acc.length ? `\nNarration so far (continue straight from it):\n${acc.map(x => x.say).join(' ')}` : ''}`) }, { role: 'user', content: `Topic: ${job.topic}` }] }); } catch { await new Promise(r => setTimeout(r, 6000)); continue; }
-        const x = jsonOf(m.content); if (x && Array.isArray(x.scenes) && x.scenes.length >= 1) got = x.scenes.slice(0, n);
+        let m; try { m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: sysFor(n, `\nStory plan:\n${outline}\nWrite ONLY the "${act}" part now: exactly ${n} scenes, all with act "${act}".${acc.length ? `\nNarration so far (continue straight from it):\n${acc.map(x => x.say).join(' ')}` : ''}`) }, { role: 'user', content: `Topic: ${job.topic}` }] }); } catch (e) { why = 'llm: ' + String(e.message).slice(0, 120); await new Promise(r => setTimeout(r, 6000)); continue; }
+        const x = jsonOf(m.content); if (x && Array.isArray(x.scenes) && x.scenes.length >= 1) got = x.scenes.slice(0, n); else why = 'parse: ' + String(m.content || '').replace(/\s+/g, ' ').slice(0, 160) + ' ...' + String(m.content || '').replace(/\s+/g, ' ').slice(-60);
       }
-      if (!got) throw new Error('The script came back broken. Try again.');
+      if (!got) throw new Error('The script came back broken. Try again. [' + why + ']');
       got.forEach(x => { if (x && typeof x === 'object') x.act = act; }); acc.push(...got);
     }
     j = { title: job.title, scenes: acc };
@@ -92,6 +136,29 @@ async function stitch(job) {
 }
 
 // Fallback when the free GPU quota is out: a free keyless AI picture (Pollinations) + slow Ken Burns pan/zoom -> 4 s clip.
+async function stitchLyric(job) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-v-'));
+  try {
+    const fd = await fontsDir(); const song = await VideoBlob.findOne({ jobId: job._id, kind: 'song' }); const sf = path.join(dir, 'song.bin'); await fs.writeFile(sf, song.data);
+    const clips = await VideoBlob.find({ jobId: job._id, kind: 'clip' }).sort('idx'); if (!clips.length) throw new Error('No clips to stitch.');
+    const total = job.songDur || (job.scenes[job.scenes.length - 1].t1 + 1); const segs = [];
+    for (let n = 0; n < clips.length; n++) {
+      const c = clips[n]; const sc = job.scenes[c.idx]; const nxt = clips[n + 1] ? job.scenes[clips[n + 1].idx].t0 : total; const start = n === 0 ? 0 : sc.t0; const D = Math.max(1.2, nxt - start);
+      job.stage = `Joining clip ${n + 1} of ${clips.length}`; await job.save().catch(() => {});
+      const cf = path.join(dir, `c${c.idx}.mp4`); await fs.writeFile(cf, c.data); const seg = path.join(dir, `s${c.idx}.mp4`); const ass = path.join(dir, `a${c.idx}.ass`);
+      await fs.writeFile(ass, assFile(sc.say, Math.max(0, sc.t0 - start), Math.min(D, sc.t1 - start + 0.25)));
+      await run(ffmpegPath, ['-y', '-loglevel', 'error', '-stream_loop', '-1', '-i', cf, '-vf', `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=24,subtitles=a${c.idx}.ass:fontsdir=${fd}`, '-an', '-t', D.toFixed(2), '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', '-pix_fmt', 'yuv420p', seg], { cwd: dir, timeout: 120000 });
+      segs.push(`file '${seg}'`);
+    }
+    await fs.writeFile(path.join(dir, 'l.txt'), segs.join('\n')); const vid = path.join(dir, 'v.mp4'), out = path.join(dir, 'out.mp4');
+    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'l.txt'), '-c', 'copy', vid], { timeout: 120000 });
+    job.stage = 'Adding the song'; await job.save().catch(() => {});
+    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', vid, '-i', sf, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-t', String(total.toFixed(2)), '-movflags', '+faststart', out], { timeout: 120000 });
+    const data = await fs.readFile(out); if (data.length > 15.5e6) throw new Error('This video is too long to save on the free plan yet. Try a shorter song.');
+    await VideoBlob.deleteMany({ jobId: job._id, kind: 'final' }); await VideoBlob.create({ jobId: job._id, kind: 'final', idx: 0, data });
+    job.bytes = data.length; job.status = 'done'; job.note = `Lyric video: ${clips.length} lyric lines, original song audio, burned-in captions, vertical 9:16${job.note ? ' · ' + job.note : ''}`; await job.save();
+  } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}
 async function stillClip(prompt, i, given) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-k-'));
   try {
@@ -116,7 +183,7 @@ async function stockClip(job, i) {
   const key = process.env.PIXABAY_KEY; if (!key) throw new Error('No stock key set.');
   const sc = job.scenes[i]; const mark = async t => { job.note = `stock ${i}: ${t}`; await job.save().catch(() => {}); };
   const parts = String(sc.kw || sc.prompt).split('|').map(x => x.trim()).filter(Boolean);
-  const K = job.long ? 2 : 1; const queries = []; for (let k = 0; k < K; k++) queries.push(parts[k] || parts[0] || String(sc.prompt));
+  const K = job.lyric ? Math.min(3, Math.max(1, Math.ceil(((sc.t1 || 0) - (sc.t0 || 0) + 0.5) / 4.5))) : job.long ? 2 : 1; const queries = []; for (let k = 0; k < K; k++) queries.push(parts[k] || parts[0] || String(sc.prompt));
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-s-')); const used = new Set(); const files = [];
   const search = async q => { const r = await fetch(`https://pixabay.com/api/videos/?key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}&per_page=20&safesearch=true${ANIM.test(job.topic) ? '&video_type=animation' : ''}`, { signal: AbortSignal.timeout(20000) }); if (!r.ok) throw new Error(`Stock service said HTTP ${r.status}.`); return ((await r.json()).hits || []).filter(h => (h.duration || 0) >= 4 && h.videos?.medium?.url); };
   const encode = async (src, out, flip) => run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', src, '-t', '4.5', '-an', '-threads', '1', '-vf', `${flip ? 'hflip,scale=' + Math.round(W * 1.3) + ':' + Math.round(H * 1.3) + ',crop=' + W + ':' + H + ',' : ''}scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=24,format=yuv420p`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-movflags', '+faststart', out], { timeout: 90000 });
@@ -197,13 +264,14 @@ async function makeScene(job, i) {
   if (!useChar && job.mode === 'stock') { await stage(job, `${tag}: finding footage`); data = await stockClip(job, i); job.note = NOTE.stock; }
   if (!useChar && job.mode === 'still') data = await stillClip(job.scenes[i].prompt, i);
   await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'clip', idx: i, data });
-  if (job.scenes[i].say) {
+  if (job.scenes[i].say && !job.lyric) {
     await stage(job, `${tag}: voiceover`);
     try { const au = await generateSpeech({ text: job.scenes[i].say, hindi: /[\u0900-\u097F]/.test(job.scenes[i].say) }); const ar = await fetch(au, { signal: AbortSignal.timeout(30000) }); if (ar.ok) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'audio', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'audio', idx: i, data: Buffer.from(await ar.arrayBuffer()) }); } } catch (e) { console.error('voice', e.message.slice(0, 120)); }
   }
   job.scenes[i].state = 'ok'; await job.save();
 }
 async function step(job) {
+  if (job.lyric && (job.status === 'queued' || job.status === 'scripting')) { job.status = 'scripting'; await job.save(); return lyricScript(job); }
   if (job.status === 'queued' || job.status === 'scripting') { job.status = 'scripting'; job.stage = job.long ? 'Planning the story' : 'Writing the script'; await job.save(); return script(job); }
   if (job.status === 'clips') {
     const i = job.scenes.findIndex(s => s.state === 'wait');
@@ -218,7 +286,7 @@ async function step(job) {
     }
     return;
   }
-  if (job.status === 'stitching') return stitch(job);
+  if (job.status === 'stitching') return job.lyric ? stitchLyric(job) : stitch(job);
 }
 let busy = false;
 async function tick() {
