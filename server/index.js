@@ -17,6 +17,7 @@ import { assertPublicUrl } from './ssrf.js';
 import * as mcp from './mcp.js';
 import { runAgent } from './agent.js';
 import { generateImage, imageEnabled, generateClip } from './media.js';
+import { VideoJob, VideoBlob, startJob, startWorker, publicJob } from './video.js';
 import { Doc, Chunk, addDocument, hasDocs, LIMITS } from './rag.js';
 import { chatCompletion } from './llm.js';
 
@@ -311,6 +312,22 @@ app.get('/api/health/image', wrap(async (q, r) => {
   catch (e) { v = { ok: false, configured: true, ms: Date.now() - t, error: String(e.message).slice(0, 140) }; }
   imgHealth = { at: Date.now(), v }; r.json(v);
 }));
+app.get('/api/videos', auth, wrap(async (q, r) => r.json({ enabled: imageEnabled(), jobs: (await VideoJob.find({ userId: q.user._id }).sort('-createdAt').limit(20)).map(publicJob) })));
+app.post('/api/videos', auth, wrap(async (q, r) => { if (!imageEnabled()) throw bad('Video is not configured.'); if (q.user.isGuest) throw bad('Create an account first.', 403); r.status(201).json(publicJob(await startJob(q.user._id, q.body?.topic))); }));
+app.get('/api/videos/:id/file', auth, wrap(async (q, r) => {
+  const job = await VideoJob.findOne({ _id: q.params.id, userId: q.user._id }); if (!job || job.status !== 'done') throw bad('Not ready.', 404);
+  const b = await VideoBlob.findOne({ jobId: job._id, kind: 'final' }); if (!b) throw bad('File missing.', 404);
+  r.set({ 'content-type': 'video/mp4', 'content-length': b.data.length, 'cache-control': 'private, max-age=3600' }).send(b.data);
+}));
+app.delete('/api/videos/:id', auth, wrap(async (q, r) => { const job = await VideoJob.findOneAndDelete({ _id: q.params.id, userId: q.user._id }); if (job) await VideoBlob.deleteMany({ jobId: job._id }); r.json({ ok: true }); }));
+// end-to-end self-test of the Short pipeline with a system user (runs once per hour at most, no secrets in the answer)
+const SELFTEST = new mongoose.Types.ObjectId('000000000000000000000001');
+app.get('/api/health/pipeline', wrap(async (q, r) => {
+  if (!imageEnabled()) return r.json({ configured: false });
+  let job = await VideoJob.findOne({ userId: SELFTEST }).sort('-createdAt');
+  if (!job || (Date.now() - new Date(job.createdAt) > 3600000 && ['done', 'failed'].includes(job.status))) { await VideoJob.deleteMany({ userId: SELFTEST }); job = await startJob(SELFTEST, 'a lighthouse on a stormy coast at night'); }
+  r.json({ ...publicJob(job), final: job.status === 'done' ? (await VideoBlob.findOne({ jobId: job._id, kind: 'final' }).select('_id').lean()) ? 'stored' : 'missing' : null });
+}));
 let vidHealth = { at: 0 };
 app.get('/api/health/video', wrap(async (q, r) => {
   if (!imageEnabled()) return r.json({ ok: false, configured: false });
@@ -373,6 +390,7 @@ if (fs.existsSync(dist)) { app.use(express.static(dist, { maxAge: '1h', setHeade
 const port = process.env.PORT || 3000;
 if (process.env.NODE_ENV !== 'test') {
   mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/orbix').then(() => {
+    startWorker();
     app.listen(port, () => console.log('Orbix listening on', port));
     setInterval(mcp.pingAll, 60000);
   }).catch(e => { console.error('DB connection failed:', e.message); process.exit(1); });
