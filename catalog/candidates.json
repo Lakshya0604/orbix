@@ -1,0 +1,192 @@
+{
+  "candidates": [
+    {
+      "id": "deepwiki",
+      "name": "DeepWiki",
+      "url": "https://mcp.deepwiki.com/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "docs",
+        "code",
+        "github"
+      ],
+      "description": "Ask questions about any public GitHub repo and read its generated wiki.",
+      "smoke": {
+        "tool": "read_wiki_structure",
+        "args": {
+          "repoName": "facebook/react"
+        }
+      },
+      "examples": [
+        "Explain the architecture of the facebook/react repo",
+        "How does routing work in vercel/next.js?"
+      ]
+    },
+    {
+      "id": "context7",
+      "name": "Context7",
+      "url": "https://mcp.context7.com/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "docs",
+        "code"
+      ],
+      "description": "Up-to-date documentation and code examples for libraries and frameworks.",
+      "smoke": {
+        "tool": "resolve-library-id",
+        "args": {
+          "libraryName": "react",
+          "query": "hooks"
+        }
+      },
+      "examples": [
+        "Show current docs for the Express rate limit middleware",
+        "How do I use useOptimistic in React 19?"
+      ]
+    },
+    {
+      "id": "exa",
+      "name": "Exa Search",
+      "url": "https://mcp.exa.ai/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "search",
+        "web"
+      ],
+      "description": "Fast web search and page fetch for current information (free tier, rate limited).",
+      "smoke": {
+        "tool": "web_search_exa",
+        "args": {
+          "query": "model context protocol",
+          "numResults": 2
+        }
+      },
+      "examples": [
+        "Find the best recent articles on the Model Context Protocol",
+        "Search for open source alternatives to Notion"
+      ]
+    },
+    {
+      "id": "gitmcp",
+      "name": "GitMCP Docs",
+      "url": "https://gitmcp.io/docs",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "docs",
+        "code",
+        "github"
+      ],
+      "description": "Search documentation and code of any GitHub project by name.",
+      "smoke": null,
+      "examples": [
+        "Summarise the modelcontextprotocol/servers repo",
+        "List the main folders of the langchain-ai/langchain repo"
+      ]
+    },
+    {
+      "id": "huggingface",
+      "name": "Hugging Face",
+      "url": "https://huggingface.co/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "ai",
+        "models",
+        "search"
+      ],
+      "description": "Search models, datasets, Spaces and papers on the Hugging Face Hub.",
+      "smoke": {
+        "tool": "hub_repo_search",
+        "args": {
+          "query": "whisper",
+          "repo_types": [
+            "model"
+          ],
+          "limit": 2
+        }
+      },
+      "examples": [
+        "Find popular open text-to-image models on Hugging Face",
+        "Search Hugging Face docs for how to fine-tune with LoRA"
+      ]
+    },
+    {
+      "id": "cloudflare-docs",
+      "name": "Cloudflare Docs",
+      "url": "https://docs.mcp.cloudflare.com/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "docs",
+        "cloud"
+      ],
+      "description": "Search the Cloudflare developer documentation.",
+      "smoke": {
+        "tool": "search_cloudflare_documentation",
+        "args": {
+          "query": "workers kv"
+        }
+      },
+      "examples": [
+        "How do Cloudflare Workers KV limits work?",
+        "Show how to set up a Pages project"
+      ]
+    },
+    {
+      "id": "coingecko",
+      "name": "CoinGecko",
+      "url": "https://mcp.api.coingecko.com/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "finance",
+        "crypto",
+        "data"
+      ],
+      "description": "Crypto prices and market data (public rate-limited endpoint).",
+      "smoke": {
+        "tool": "search_docs",
+        "args": {
+          "query": "bitcoin price"
+        }
+      },
+      "examples": [
+        "What are the current prices of bitcoin and ethereum?",
+        "Show the top 5 trending coins today"
+      ]
+    },
+    {
+      "id": "ltx-video",
+      "name": "LTX Video (text to video)",
+      "url": "https://lightricks-ltx-video-distilled.hf.space/gradio_api/mcp/",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "video",
+        "media",
+        "free-gpu"
+      ],
+      "description": "Generate short videos from a text prompt on a free shared GPU. Clips are short and may queue when busy.",
+      "smoke": {
+        "tool": "ltx_video_distilled_generate",
+        "args": {
+          "prompt": "a red balloon over a calm lake at sunrise",
+          "mode": "text-to-video",
+          "duration_ui": 1,
+          "height_ui": 512,
+          "width_ui": 704,
+          "randomize_seed": true
+        },
+        "timeoutMs": 120000
+      },
+      "examples": [
+        "Make a 2 second video of a red balloon floating over a lake at sunrise",
+        "Generate a short video of rain on a neon city street"
+      ]
+    }
+  ]
+}
