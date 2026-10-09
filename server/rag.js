@@ -8,7 +8,7 @@ const { Schema, model } = mongoose;
 export const Doc = model('Doc', new Schema({ userId: { type: Schema.Types.ObjectId, index: true, required: true }, name: String, kind: String, chars: Number, chunks: Number }, { timestamps: true }));
 export const Chunk = model('Chunk', new Schema({ userId: { type: Schema.Types.ObjectId, index: true, required: true }, docId: { type: Schema.Types.ObjectId, index: true }, docName: String, i: Number, text: String, vec: Buffer }));
 
-export const LIMITS = { fileBytes: 6 * 1024 * 1024, textChars: 400000, docsPerUser: 20, chunksPerUser: 3000 };
+export const LIMITS = { fileBytes: 25 * 1024 * 1024, textChars: 400000, docsPerUser: 20, chunksPerUser: 3000 };
 const DIM = 384;
 const STOP = new Set('the a an and or but if of to in on at for with is are was were be been it this that these those as by from not no do does did have has had i you he she we they my your our me us them will can could should would about into over than then so such there their what which who whom how when where why also just very more most some any all'.split(' '));
 const stem = w => w.length > 5 ? w.replace(/(ing|edly|ed|ies|es|s|ly)$/, m => (m === 'ies' ? 'y' : '')) : w;
