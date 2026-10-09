@@ -41,3 +41,14 @@ export async function generateClip({ prompt, seconds = 2, width = 704, height = 
   if (!/^https:\/\/[a-z0-9.-]+\.hf\.space\//.test(url || '')) throw new Error('The video service returned no clip.');
   return url;
 }
+
+// Voiceover: Edge neural voices through a public free Space (no GPU quota needed).
+const TSPACE = 'https://innoai-edge-tts-text-to-speech.hf.space';
+export async function generateSpeech({ text, hindi = false }) {
+  const t = String(text || '').trim().slice(0, 400); if (!t) throw new Error('No narration text.');
+  const voice = hindi ? 'hi-IN-SwaraNeural - hi-IN (Female)' : 'en-US-AndrewNeural - en-US (Male)';
+  const out = await callSpace(TSPACE, 'tts_interface', [t, voice, 0, 0], { waitMs: 45000 });
+  const url = out?.[0]?.url;
+  if (!/^https:\/\/[a-z0-9.-]+\.hf\.space\//.test(url || '')) throw new Error('The voice service returned no audio.');
+  return url;
+}
