@@ -37,7 +37,7 @@ function ServerCard({ s, onReconnect, onRemove, onToggle, catalog, send, setDraw
 }
 
 export default function Hub({ user, dark, setDark, logout }) {
-  const [tab, setTab] = useState('servers'); const [q, setQ] = useState(''); const [cat, setCat] = useState('all');
+  const [tok, setTok] = useState({}); const [tab, setTab] = useState('servers'); const [q, setQ] = useState(''); const [cat, setCat] = useState('all');
   const [servers, setServers] = useState([]);
   const [catalog, setCatalog] = useState({ servers: [], rejected: [] });
   const [health, setHealth] = useState({});
@@ -76,7 +76,7 @@ export default function Hub({ user, dark, setDark, logout }) {
   }, []);
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [msgs, live]);
 
-  const addCatalog = async c => { try { await api('/api/servers', { method: 'POST', body: { catalogId: c.id } }); await loadServers(); } catch (e) { say(e.message); } };
+  const addCatalog = async (c, apiKey) => { try { await api('/api/servers', { method: 'POST', body: { catalogId: c.id, apiKey } }); await loadServers(); } catch (e) { say(e.message); } };
   const connectAllFree = async () => { orbi('happy', 'Connecting all the free servers…', 4000); for (const c of catalog.servers.filter(c => c.auth === 'none' && !servers.some(s => s.catalogId === c.id))) await addCatalog(c); };
   const addCustom = async e => { e.preventDefault(); try { await api('/api/servers', { method: 'POST', body: { name: custom.name, url: custom.url, apiKey: custom.apiKey || undefined } }); setCustom({ name: '', url: '', apiKey: '', open: false }); await loadServers(); } catch (x) { say(x.message); } };
   const reconnect = async s => { setServers(l => l.map(x => x.id === s.id ? { ...x, state: 'connecting' } : x)); try { await api(`/api/servers/${s.id}/connect`, { method: 'POST' }); } catch (e) { say(e.message); } loadServers(); };
@@ -152,9 +152,10 @@ export default function Hub({ user, dark, setDark, logout }) {
                     <span className={`badge ${c.auth === 'none' ? 'free' : 'key'}`}>{c.auth === 'none' ? 'Free' : 'Needs key'}</span></div>
                   <p>{c.description}</p>
                   <div className="cat-foot">
-                    <span className={`health ${h ? (h.ok ? 'up' : 'down') : 'unk'}`}>{h ? (h.ok ? `Working · ${h.latencyMs} ms` : `Not working`) : `${c.toolCount} tools · tested ${c.testedAt}`}</span>
-                    {added ? <span className="added">✓ Added</span> : <button className="chip primary" onClick={() => addCatalog(c)}>Connect</button>}
+                    <span className={`health ${h ? (h.ok ? 'up' : 'down') : 'unk'}`}>{h && h.ok !== null ? (h.ok ? `Working · ${h.latencyMs} ms` : `Not working`) : (c.toolCount ? `${c.toolCount} tools · tested ${c.testedAt}` : 'Needs your own token')}</span>
+                    {added ? <span className="added">✓ Added</span> : <button className="chip primary" onClick={() => c.auth === 'none' ? addCatalog(c) : (tok[c.id] ? addCatalog(c, tok[c.id]) : say('Paste your token first.'))}>Connect</button>}
                   </div>
+                  {!added && c.auth !== 'none' && <div className="tokrow"><input type="password" autoComplete="off" placeholder="Paste your own token" value={tok[c.id] || ''} onChange={e => setTok({ ...tok, [c.id]: e.target.value })} /><small>{c.tokenHelp}</small></div>}
                 </div>
               );
             })}
