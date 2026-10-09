@@ -18,16 +18,18 @@ export const BUDDIES = {
   nova: { name: 'Nova', tag: 'Cool and witty', a: '#55b0ff', b: '#1f5fe0', screen: '#07163a', eye: '#ff8ad8', ant: '#ffd86a', arm: '#1f5fe0',
     hi: 'Oh, you are here. Fine, I will help.', poke: ['Do I look like a button?', 'Bold move.', 'Really?'], angry: 'One more poke and I leave the chat.', love: 'Okay... that is actually nice.' },
 };
+export const GOLD = { name: 'Orbi', tag: 'God mode', a: '#ffffff', b: '#f0b93b', screen: '#2b1c04', eye: '#ffd45e', ant: '#ffb300', arm: '#e8b53c' };
 export const BUDDY_IDS = Object.keys(BUDDIES);
 const CREATOR = /\b(who|kisne|kaun)\b[^.?!]{0,40}\b(made|make|created|built|develop\w*|banaya|bnaya|bana)\b|\b(your|tera|tumhara|aapka)\s+(creator|maker|developer|owner)\b/i;
 
 export function Face({ mood, buddy = 'orbi', god = false, uid = 'f' }) {
-  const B = BUDDIES[buddy] || BUDDIES.orbi; const gid = `ob-${uid}-${buddy}`;
+  const B = god ? { ...(BUDDIES[buddy] || BUDDIES.orbi), ...GOLD } : (BUDDIES[buddy] || BUDDIES.orbi); const gid = `ob-${uid}-${buddy}`;
   // SVG only: transforms and opacity animate, so it stays smooth on phones.
   const eyes = {
     happy: <><path d="M38 52 q6 -9 12 0" className="eyeline" /><path d="M70 52 q6 -9 12 0" className="eyeline" /></>,
     love: <><path d="M44 58 c-9 -7 -10 -13 -4 -14 c3 0 4 2 4 3 c0 -1 1 -3 4 -3 c6 1 5 7 -4 14z" fill="#ff5c8a" /><path d="M76 58 c-9 -7 -10 -13 -4 -14 c3 0 4 2 4 3 c0 -1 1 -3 4 -3 c6 1 5 7 -4 14z" fill="#ff5c8a" /></>,
     angry: <><circle cx="44" cy="55" r="5" className="eye" /><circle cx="76" cy="55" r="5" className="eye" /><path d="M33 42 l17 7 M87 42 l-17 7" className="eyeline" /></>,
+    thinking: <><circle cx="47" cy="49" r="6" className="eye" /><circle cx="79" cy="49" r="6" className="eye" /><circle cx="49" cy="47" r="2" fill="#fff" /><circle cx="81" cy="47" r="2" fill="#fff" /><path d="M36 38 l14 -3 M70 35 l14 3" className="eyeline" /></>,
     worried: <><circle cx="44" cy="53" r="5.5" className="eye" /><circle cx="76" cy="53" r="5.5" className="eye" /><path d="M36 42 l14 4 M84 42 l-14 4" className="eyeline" /></>,
     sleepy: <><path d="M38 54 h12 M70 54 h12" className="eyeline" /></>,
   }[mood] || <><circle cx="44" cy="52" r="6" className="eye blink" /><circle cx="76" cy="52" r="6" className="eye blink" /><circle cx="46" cy="50" r="1.8" fill="#fff" /><circle cx="78" cy="50" r="1.8" fill="#fff" /></>;
@@ -39,7 +41,7 @@ export function Face({ mood, buddy = 'orbi', god = false, uid = 'f' }) {
     nova: <path d="M30 46 h60" stroke="#ff8ad8" strokeWidth="3" opacity=".55" />,
   }[buddy];
   return (
-    <svg viewBox="0 0 120 120" className={`orbi-svg m-${mood}${god ? ' god' : ''}`} aria-hidden="true">
+    <svg viewBox="0 0 120 120" className={`orbi-svg m-${mood}${god ? ' god' : ''}`} style={{ '--eye': B.eye }} aria-hidden="true">
       <defs><linearGradient id={gid} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor={B.a} /><stop offset="1" stopColor={B.b} /></linearGradient>
         {god && <radialGradient id={`${gid}-g`}><stop offset="0" stopColor="#ffe28a" stopOpacity=".9" /><stop offset="1" stopColor="#ffb300" stopOpacity="0" /></radialGradient>}</defs>
       {god && <circle cx="60" cy="58" r="58" fill={`url(#${gid}-g)`} className="halo" />}
@@ -54,6 +56,7 @@ export function Face({ mood, buddy = 'orbi', god = false, uid = 'f' }) {
       </g>
       <g className="arm armL"><rect x="6" y="58" width="16" height="9" rx="4.5" fill={B.arm} /></g>
       <g className="arm armR"><rect x="98" y="58" width="16" height="9" rx="4.5" fill={B.arm} /></g>
+      {mood === 'thinking' && <g className="think"><circle cx="94" cy="20" r="4" /><circle cx="106" cy="12" r="5" /><circle cx="118" cy="6" r="6" /></g>}
       <ellipse cx="60" cy="108" rx="24" ry="5" className="shadow" />
     </svg>
   );
@@ -70,8 +73,10 @@ export default function Mascot({ canChat, hidden, user }) {
   const pos = useRef((() => { try { return JSON.parse(localStorage.getItem(POS_KEY)) || { x: 0, y: 0 }; } catch { return { x: 0, y: 0 }; } })());
   const drag = useRef(null); const taps = useRef([]); const tapT = useRef(null); const press = useRef(null); const stroke = useRef({ d: 0, t: 0, x: 0, y: 0 }); const lastMoved = useRef(false);
   const B = BUDDIES[buddy]; const god = !!user?.god;
+  useEffect(() => { const f = () => { setOpen(true); setPick(true); }; window.addEventListener('orbi-pick', f); return () => window.removeEventListener('orbi-pick', f); }, []);
+  useEffect(() => { if (!canChat || localStorage.getItem('orbi_picked')) return; const t = setTimeout(() => { react('wave', 'Pick your buddy! Tap me.', 9000); }, 2500); return () => clearTimeout(t); }, [canChat]);
   useEffect(() => { const f = e => BUDDIES[e.detail] && setBuddy0(e.detail); window.addEventListener('orbi-avatar', f); return () => window.removeEventListener('orbi-avatar', f); }, []);
-  useEffect(() => { if (user?.avatar && BUDDIES[user.avatar]) setBuddy(user.avatar); }, [user?.avatar]);
+  useEffect(() => { if (user?.avatar && BUDDIES[user.avatar] && (user.avatar !== 'orbi' || !localStorage.getItem('orbi_picked'))) setBuddy(user.avatar); }, [user?.avatar]);
   const react = (m, s, ms = 6000) => { setMood(m); if (s) setSay(s); clearTimeout(timer.current); timer.current = setTimeout(() => { setMood('idle'); setSay(''); }, ms); };
   useEffect(() => { const f = e => react(e.detail.mood, e.detail.say, e.detail.ms); window.addEventListener('orbi', f); return () => window.removeEventListener('orbi', f); }, []);
   useEffect(() => { const t = setTimeout(() => react('wave', god ? 'Welcome back, boss 👑' : B.hi, 4500), 900); return () => clearTimeout(t); }, [buddy, god]);
@@ -128,7 +133,7 @@ export default function Mascot({ canChat, hidden, user }) {
   };
 
   async function choose(b) {
-    setBuddy(b); setPick(false); react('happy', `${BUDDIES[b].name} here! ${BUDDIES[b].hi}`, 4000);
+    localStorage.setItem('orbi_picked', '1'); setBuddy(b); setPick(false); react('happy', `${BUDDIES[b].name} here! ${BUDDIES[b].hi}`, 4000);
     if (canChat) { try { await api('/api/me/avatar', { method: 'POST', body: { avatar: b } }); } catch {} }
   }
   async function ask(e) {
@@ -167,4 +172,4 @@ export default function Mascot({ canChat, hidden, user }) {
       </button>
     </div>
   );
-}
+            }
