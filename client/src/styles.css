@@ -273,3 +273,17 @@ input:focus,textarea:focus{border-color:var(--v);box-shadow:0 0 0 4px rgba(109,5
 .think circle{fill:var(--eye,#7df0ff);opacity:.25;animation:ob-think 1.2s ease-in-out infinite}.think circle:nth-child(2){animation-delay:.2s}.think circle:nth-child(3){animation-delay:.4s}
 @keyframes ob-think{50%{opacity:1;transform:translateY(-3px)}}
 .orbi-svg.god .body rect:first-child{filter:drop-shadow(0 0 6px rgba(255,190,40,.7))}
+
+.doc-chip{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 14px 8px;padding:9px 12px;border-radius:14px;background:var(--accent-soft,rgba(124,92,255,.12));border:1px solid rgba(124,92,255,.3);font-size:13px}.doc-chip b{word-break:break-all}
+
+.orbi-play-wrap{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;padding:14px;background:rgba(20,14,40,.35);-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2)}
+.orbi-play{width:min(420px,100%);max-height:calc(100dvh - 28px);display:flex;flex-direction:column;background:var(--card);border:1.5px solid var(--line);border-radius:26px;box-shadow:0 30px 80px rgba(30,15,80,.35);overflow:hidden}
+.orbi-play .orbi-head{flex:none}
+.orbi-stage{flex:none;display:flex;flex-direction:column;align-items:center;padding:6px 12px 0;min-height:200px}
+.orbi-say{min-height:34px;max-width:92%;text-align:center;font-size:14px;font-weight:600;padding:6px 12px;border-radius:14px;background:var(--bg-soft,rgba(124,92,255,.1));margin-bottom:4px}.orbi-say:empty{visibility:hidden}
+.orbi-big{position:relative;width:min(190px,48vw);aspect-ratio:1;border:0;background:none;padding:0;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;filter:drop-shadow(0 14px 18px rgba(60,30,140,.3));transition:transform .15s}.orbi-big:active{transform:scale(.93)}
+.orbi-big.dance{animation:ob-dance .55s ease-in-out infinite}@keyframes ob-dance{0%,100%{transform:rotate(-8deg) translateY(0)}50%{transform:rotate(8deg) translateY(-14px)}}
+.orbi-acts{flex:none;display:flex;flex-wrap:wrap;gap:6px;justify-content:center;padding:6px 12px}.orbi-acts button{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:7px 12px;font:inherit;font-size:13px;cursor:pointer;touch-action:manipulation}.orbi-acts button:active{transform:scale(.95)}
+.orbi-play .orbi-log{flex:1 1 auto;min-height:60px;max-height:160px;overflow:auto}.orbi-play form{flex:none;display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}.orbi-play input{flex:1;min-width:0;padding:8px 12px}
+.hf-out{white-space:pre-wrap;word-break:break-word;margin:10px 0 0;padding:10px 12px;border-radius:12px;background:var(--bg-soft,rgba(124,92,255,.08));font:13px/1.5 ui-monospace,monospace;max-height:320px;overflow:auto}
+.orbi-play{box-sizing:border-box;width:min(420px,calc(100vw - 28px))}.orbi-play-wrap{box-sizing:border-box}
