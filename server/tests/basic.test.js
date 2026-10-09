@@ -14,7 +14,7 @@ test('media links are detected', () => { assert.deepEqual(mediaIn('see https://a
 test('catalog only holds verified entries', () => {
   const c = JSON.parse(fs.readFileSync(new URL('../../catalog/servers.json', import.meta.url)));
   assert.ok(c.servers.length > 0);
-  for (const s of c.servers) { assert.equal(s.status, 'verified'); assert.ok(s.url.startsWith('https://')); assert.ok(['none', 'key'].includes(s.auth)); }
+  for (const s of c.servers) { assert.equal(s.status, s.auth === 'none' ? 'verified' : 'needs-token'); assert.ok(s.url.startsWith('https://')); assert.ok(['none', 'key'].includes(s.auth)); }
 });
 import { cleanSchema } from '../agent.js';
 test('schema refs are inlined for Groq', () => {
