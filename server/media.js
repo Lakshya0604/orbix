@@ -83,3 +83,12 @@ export async function generateWithReference({ image, prompt }) {
   const url = out?.[0]?.url; if (!/^https:\/\/[a-z0-9.-]+\.hf\.space\//.test(url || '')) throw new Error('The character picture service returned no picture.');
   return url;
 }
+
+// Lyrics with timestamps: Groq Whisper (same free key as the chat model).
+export async function transcribeSong(buf, language) {
+  const key = process.env.GROQ_API_KEY; if (!key) throw new Error('Lyrics need the Groq key, which is not set.');
+  const fd = new FormData(); fd.append('file', new Blob([buf], { type: 'audio/mpeg' }), 'song.mp3'); fd.append('model', 'whisper-large-v3'); fd.append('response_format', 'verbose_json'); fd.append('timestamp_granularities[]', 'segment'); fd.append('temperature', '0'); if (language) fd.append('language', language);
+  const r = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', { method: 'POST', headers: { authorization: `Bearer ${key}` }, body: fd, signal: AbortSignal.timeout(120000) });
+  const t = await r.text(); if (!r.ok) throw new Error(`The lyrics service said HTTP ${r.status}: ${t.replace(/\s+/g, ' ').slice(0, 140)}`);
+  const j = JSON.parse(t); return { language: j.language || '', segments: (j.segments || []).map(s => ({ t0: Number(s.start) || 0, t1: Number(s.end) || 0, text: String(s.text || '').trim() })).filter(s => s.text) };
+}
