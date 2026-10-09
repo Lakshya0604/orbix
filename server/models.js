@@ -6,6 +6,7 @@ export const User = model('User', new Schema({
   guestUses: { type: Number, default: 0 },
   name: { type: String, default: '' },
   avatar: { type: String, default: 'orbi' },
+  memory: { type: String, default: '' }, memoryOff: { type: Boolean, default: false }, memoryAt: Date,
   passwordHash: String,
   googleId: { type: String, index: true, sparse: true },
   githubId: { type: String, index: true, sparse: true },
