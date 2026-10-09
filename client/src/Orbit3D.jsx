@@ -10,11 +10,11 @@ export default function Orbit3D({ count = 7, dark }) {
     const renderer = new THREE.WebGLRenderer({ antialias: !small, alpha: true, powerPreference: 'low-power' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, small ? 1.5 : 2));
     el.appendChild(renderer.domElement);
-    const scene = new THREE.Scene(); const cam = new THREE.PerspectiveCamera(40, 1, 0.1, 100); cam.position.set(0, 1.2, 8);
+    const scene = new THREE.Scene(); const cam = new THREE.PerspectiveCamera(40, 1, 0.1, 100); cam.position.set(0, 1.2, 11);
     scene.add(new THREE.AmbientLight(0xffffff, dark ? 0.55 : 0.9));
     const key = new THREE.PointLight(0xff6a3d, 40, 30); key.position.set(4, 4, 5); scene.add(key);
     const fill = new THREE.PointLight(0x6d3bff, 36, 30); fill.position.set(-5, -2, 4); scene.add(fill);
-    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(1.25, small ? 3 : 4), new THREE.MeshStandardMaterial({ color: 0x6d3bff, roughness: 0.25, metalness: 0.35, emissive: 0x2a0f8f, emissiveIntensity: 0.6 }));
+    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(1.05, small ? 3 : 4), new THREE.MeshStandardMaterial({ color: 0x6d3bff, roughness: 0.25, metalness: 0.35, emissive: 0x2a0f8f, emissiveIntensity: 0.9 }));
     scene.add(core);
     const ringGeo = new THREE.TorusGeometry(2.6, 0.012, 8, 160);
     const rings = [];
@@ -24,7 +24,7 @@ export default function Orbit3D({ count = 7, dark }) {
       const pivot = new THREE.Object3D(); pivot.rotation.set((i * 0.7) % 3, (i * 1.3) % 3, 0); scene.add(pivot);
       const r = 2.4 + (i % 3) * 0.55;
       const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: dark ? 0xffffff : 0x6d3bff, transparent: true, opacity: dark ? 0.12 : 0.18 })); ring.scale.setScalar(r / 2.6); pivot.add(ring); rings.push(ring);
-      const s = new THREE.Mesh(new THREE.SphereGeometry(0.17 + (i % 2) * 0.07, 20, 20), new THREE.MeshStandardMaterial({ color: cols[i % cols.length], roughness: 0.3, emissive: cols[i % cols.length], emissiveIntensity: 0.35 }));
+      const s = new THREE.Mesh(new THREE.SphereGeometry(0.17 + (i % 2) * 0.07, 20, 20), new THREE.MeshStandardMaterial({ color: cols[i % cols.length], roughness: 0.3, emissive: cols[i % cols.length], emissiveIntensity: 0.9 }));
       s.userData = { r, speed: 0.25 + i * 0.07, a: i * 1.1 }; pivot.add(s); sats.push(s);
     }
     const resize = () => { const w = el.clientWidth || 300, h = el.clientHeight || 300; renderer.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix(); };
