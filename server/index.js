@@ -344,9 +344,10 @@ const SELFTEST = new mongoose.Types.ObjectId('000000000000000000000001');
 app.get('/api/health/pipeline', wrap(async (q, r) => {
   if (!imageEnabled()) return r.json({ configured: false });
   let job = await VideoJob.findOne({ userId: SELFTEST }).sort('-createdAt');
-  if (!job || (Date.now() - new Date(job.createdAt) > 3600000 && ['done', 'failed'].includes(job.status))) { await VideoJob.deleteMany({ userId: SELFTEST }); job = await startJob(SELFTEST, 'a lighthouse on a stormy coast at night'); }
+  if (!job || !String(job.note || job.status).match(/vertical|clips|queued|scripting|stitching/) || (Date.now() - new Date(job.createdAt) > 3600000 && ['done', 'failed'].includes(job.status))) { await VideoJob.deleteMany({ userId: SELFTEST }); job = await startJob(SELFTEST, 'a lighthouse on a stormy coast at night'); }
   r.json({ ...publicJob(job), final: job.status === 'done' ? (await VideoBlob.findOne({ jobId: job._id, kind: 'final' }).select('_id').lean()) ? 'stored' : 'missing' : null });
 }));
+app.get('/api/health/pipeline/file', wrap(async (q, r) => { const job = await VideoJob.findOne({ userId: SELFTEST, status: 'done' }).sort('-createdAt'); const b = job && await VideoBlob.findOne({ jobId: job._id, kind: 'final' }); if (!b) throw bad('No self-test video yet.', 404); r.set({ 'content-type': 'video/mp4', 'content-length': b.data.length }).send(b.data); }));
 let vidHealth = { at: 0 };
 app.get('/api/health/video', wrap(async (q, r) => {
   if (!imageEnabled()) return r.json({ ok: false, configured: false });
