@@ -348,6 +348,13 @@ app.get('/api/health/pipeline', wrap(async (q, r) => {
   if (!job || job.topic !== want || (job.status === 'done' && !/vertical/.test(job.note || '')) || (Date.now() - new Date(job.createdAt) > 3600000 && ['done', 'failed'].includes(job.status)) || (job.status === 'failed' && Date.now() - new Date(job.createdAt) > 300000) || (!['done', 'failed'].includes(job.status) && Date.now() - new Date(job.createdAt) > 480000)) { await VideoJob.deleteMany({ userId: SELFTEST }); job = await startJob(SELFTEST, want); }
   r.json({ ...publicJob(job), final: job.status === 'done' ? (await VideoBlob.findOne({ jobId: job._id, kind: 'final' }).select('_id').lean()) ? 'stored' : 'missing' : null });
 }));
+app.get('/api/health/agnes', wrap(async (q, r) => {
+  const key = process.env.AGNES_API_KEY; if (!key) return r.json({ configured: false });
+  const H = { authorization: `Bearer ${key}`, 'content-type': 'application/json' }; const out = { configured: true };
+  try { const m = await fetch('https://apihub.agnes-ai.com/v1/models', { headers: H, signal: AbortSignal.timeout(15000) }); const t = await m.text(); out.models = { status: m.status, body: t.replace(/\s+/g, ' ').slice(0, 600) }; } catch (e) { out.models = { error: e.message.slice(0, 100) }; }
+  try { const c = await fetch('https://apihub.agnes-ai.com/v1/videos', { method: 'POST', headers: H, body: JSON.stringify({ model: 'agnes-video-v2.0', prompt: 'a red balloon floating up in a blue sky', width: 576, height: 1024, num_frames: 97, frame_rate: 24 }), signal: AbortSignal.timeout(20000) }); const t = await c.text(); out.create = { status: c.status, body: t.replace(/\s+/g, ' ').replace(key, '***').slice(0, 500) }; } catch (e) { out.create = { error: e.message.slice(0, 100) }; }
+  r.json(out);
+}));
 app.get('/api/health/pipeline/file', wrap(async (q, r) => { const job = await VideoJob.findOne({ userId: SELFTEST, status: 'done' }).sort('-createdAt'); const b = job && await VideoBlob.findOne({ jobId: job._id, kind: 'final' }); if (!b) throw bad('No self-test video yet.', 404); r.set({ 'content-type': 'video/mp4', 'content-length': b.data.length }).send(b.data); }));
 let vidHealth = { at: 0 };
 app.get('/api/health/video', wrap(async (q, r) => {
