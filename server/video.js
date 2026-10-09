@@ -13,7 +13,7 @@ const { Schema, model } = mongoose; const run = promisify(execFile);
 export const VideoJob = model('VideoJob', new Schema({
   userId: { type: Schema.Types.ObjectId, index: true }, topic: String, title: { type: String, default: '' },
   status: { type: String, default: 'queued', index: true }, // queued, scripting, clips, stitching, done, failed
-  scenes: [{ prompt: String, say: { type: String, default: '' }, state: { type: String, default: 'wait' } }], error: String, note: String,
+  scenes: [{ prompt: String, say: { type: String, default: '' }, state: { type: String, default: 'wait' } }], error: String, note: String, mode: { type: String, default: 'ai' },
   lockUntil: { type: Date, default: null }, bytes: { type: Number, default: 0 },
 }, { timestamps: true }));
 export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer }, { timestamps: true }));
@@ -60,14 +60,44 @@ async function stitch(job) {
     job.bytes = data.length; job.status = 'done'; job.note = `${clips.length} clips, ${voiced ? `${voiced} with voiceover` : 'no voiceover (voice service was busy)'}, vertical 9:16${job.note ? ' · ' + job.note : ''}`; await job.save();
   } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
+
+// Fallback when the free GPU quota is out: a free keyless AI picture (Pollinations) + slow Ken Burns pan/zoom -> 4 s clip.
+async function stillClip(prompt, i) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-k-'));
+  try {
+    const q = encodeURIComponent(`${String(prompt).slice(0, 350)}, vertical cinematic photo, vivid light`);
+    let buf = null, err = '';
+    for (let a = 0; a < 3 && !buf; a++) {
+      try { const r = await fetch(`https://image.pollinations.ai/prompt/${q}?width=576&height=1024&nologo=true&seed=${Date.now() % 100000 + i}`, { signal: AbortSignal.timeout(60000) }); const b = Buffer.from(await r.arrayBuffer()); if (r.ok && /image/.test(r.headers.get('content-type') || '') && b.length > 5000) buf = b; else err = `HTTP ${r.status}`; } catch (e) { err = e.message; }
+      if (!buf) await new Promise(r => setTimeout(r, 4000));
+    }
+    if (!buf) throw new Error(`The free picture service did not answer (${String(err).slice(0, 60)}).`);
+    const img = path.join(dir, 'i.jpg'), out = path.join(dir, 'k.mp4'); await fs.writeFile(img, buf);
+    const z = i % 2 ? "'1.28-0.0020*on'" : "'1+0.0020*on'";
+    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-loop', '1', '-i', img, '-vf', `scale=1080:-2,zoompan=z=${z}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=96:s=${W}x${H}:fps=24,format=yuv420p`, '-t', '4', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26', '-movflags', '+faststart', out], { timeout: 90000 });
+    return await fs.readFile(out);
+  } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}
 async function step(job) {
   if (job.status === 'queued' || job.status === 'scripting') { job.status = 'scripting'; await job.save(); return script(job); }
   if (job.status === 'clips') {
     const i = job.scenes.findIndex(s => s.state !== 'ok'); if (i < 0) { job.status = 'stitching'; return job.save(); }
     try {
-      const url = await generateClip({ prompt: job.scenes[i].prompt, seconds: 4, width: W, height: H });
-      const r = await fetch(url, { signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Could not download the clip.');
-      await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'clip', idx: i, data: Buffer.from(await r.arrayBuffer()) });
+      let data;
+      if (job.mode !== 'still') {
+        try {
+          const url = await generateClip({ prompt: job.scenes[i].prompt, seconds: 4, width: W, height: H });
+          const r = await fetch(url, { signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Could not download the clip.');
+          data = Buffer.from(await r.arrayBuffer());
+        } catch (e) {
+          if (!/used up|quota|GPU/i.test(e.message)) throw e;
+          const done = job.scenes.filter(s => s.state === 'ok').length;
+          if (done) { await VideoBlob.deleteMany({ jobId: job._id, kind: { $in: ['clip', 'audio'] } }); job.scenes.forEach(s => { s.state = 'wait'; }); }
+          job.mode = 'still'; job.note = 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion'; await job.save();
+        }
+      }
+      if (job.mode === 'still') data = await stillClip(job.scenes[i].prompt, i);
+      await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'clip', idx: i, data });
       job.scenes[i].state = 'ok'; await job.save();
       if (job.scenes[i].say) { try { const au = await generateSpeech({ text: job.scenes[i].say, hindi: /[\u0900-\u097F]/.test(job.scenes[i].say) }); const ar = await fetch(au, { signal: AbortSignal.timeout(30000) }); if (ar.ok) await VideoBlob.create({ jobId: job._id, kind: 'audio', idx: i, data: Buffer.from(await ar.arrayBuffer()) }); } catch (e) { console.error('voice', e.message.slice(0, 120)); } }
     } catch (e) {
