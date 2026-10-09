@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { token } from './api.js';
+import { Rich } from './Rich.jsx';
 
 const URL_RE = /(https:\/\/[^\s"'<>)\]]+)/g;
 const isVideo = u => /\.(mp4|webm|mov)(\?|$)/i.test(u);
@@ -26,10 +27,9 @@ function Media({ url, onError, shared }) {
   );
 }
 export function Answer({ text, onError, shared }) {
-  const parts = text.split(URL_RE);
-  const media = [...new Set((text.match(URL_RE) || []).filter(u => isVideo(u) || isImage(u) || /\.(mp3|wav|pdf|zip|csv)(\?|$)/i.test(u) || /\/file=/.test(u)))];
+    const media = [...new Set((text.match(URL_RE) || []).filter(u => isVideo(u) || isImage(u) || /\.(mp3|wav|pdf|zip|csv)(\?|$)/i.test(u) || /\/file=/.test(u)))];
   return (<>
-    <div className="answer">{parts.map((p, i) => i % 2 ? <a key={i} href={p} target="_blank" rel="noreferrer noopener">{p.length > 60 ? p.slice(0, 57) + '…' : p}</a> : <span key={i}>{p}</span>)}</div>
+    <div className="answer"><Rich text={text} /></div>
     {media.map(u => <Media key={u} url={u} onError={onError} shared={shared} />)}
   </>);
 }
