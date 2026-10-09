@@ -35,3 +35,9 @@ export const Visit = model('Visit', new Schema({
   device: String,
   at: { type: Date, default: Date.now, expires: 60 * 60 * 24 * 180 },
 }));
+export const AuthEvent = model('AuthEvent', new Schema({
+  email: String,
+  type: String, // signup | login
+  how: String, // password | github | google
+  at: { type: Date, default: Date.now, index: true, expires: 60 * 60 * 24 * 180 },
+}));
