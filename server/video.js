@@ -74,10 +74,10 @@ async function stitch(job) {
       job.stage = `Joining clip ${segs.length + 1} of ${clips.length}`; await job.save().catch(() => {});
       const cf = path.join(dir, `c${c.idx}.mp4`); await fs.writeFile(cf, c.data); const cd = (await dur(cf)) || 4;
       const ab = await VideoBlob.findOne({ jobId: job._id, kind: 'audio', idx: c.idx }); let af = null, ad = 0;
-      if (ab) { af = path.join(dir, `a${c.idx}.mp3`); await fs.writeFile(af, ab.data); ad = await dur(af); if (ad) voiced++; else af = null; }
-      const D = Math.max(cd, ad + 0.25); const seg = path.join(dir, `s${c.idx}.mp4`);
-      const vf = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=24,tpad=stop_mode=clone:stop_duration=${Math.max(0, D - cd).toFixed(2)}`;
-      await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', cf, ...(af ? ['-i', af] : ['-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo']), '-vf', vf, '-af', 'aresample=44100,apad', '-t', D.toFixed(2), '-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', job.long ? '30' : '26', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '44100', '-ac', '2', '-shortest', '-movflags', '+faststart', seg], { timeout: 120000 });
+      if (ab) { const raw = path.join(dir, `a${c.idx}.mp3`); await fs.writeFile(raw, ab.data); af = path.join(dir, `t${c.idx}.mp3`); try { await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', raw, '-af', 'silenceremove=start_periods=1:start_threshold=-50dB:stop_periods=1:stop_threshold=-50dB:stop_duration=0.1', af]); } catch { af = raw; } ad = await dur(af); if (!ad && af !== raw) { af = raw; ad = await dur(af); } if (ad) voiced++; else af = null; }
+      const D = af ? Math.max(1.5, ad + 0.12) : cd; const seg = path.join(dir, `s${c.idx}.mp4`);
+      const vf = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=24`;
+      await run(ffmpegPath, ['-y', '-loglevel', 'error', '-stream_loop', '-1', '-i', cf, ...(af ? ['-i', af] : ['-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo']), '-vf', vf, '-af', 'aresample=44100,apad', '-t', D.toFixed(2), '-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', job.long ? '30' : '26', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '44100', '-ac', '2', '-shortest', '-movflags', '+faststart', seg], { timeout: 120000 });
       segs.push(`file '${seg}'`);
     }
     await fs.writeFile(path.join(dir, 'l.txt'), segs.join('\n'));
