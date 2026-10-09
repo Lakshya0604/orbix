@@ -378,6 +378,24 @@
       "smoke": "passed",
       "testedAt": "2026-10-09",
       "status": "verified"
+    },
+    {
+      "id": "github",
+      "name": "GitHub (your account)",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "transport": "http",
+      "auth": "key",
+      "tokenHelp": "Paste your own GitHub personal access token (read-only is enough). Create one at github.com/settings/personal-access-tokens. It is stored encrypted and only your Orbix account can use it.",
+      "tags": [
+        "github",
+        "code"
+      ],
+      "description": "Browse YOUR repos, issues and pull requests. Each user connects their own GitHub with their own token.",
+      "status": "needs-token",
+      "examples": [
+        "List my most recently updated repositories",
+        "Show open issues in my repo Lakshya0604/orbix"
+      ]
     }
   ],
   "rejected": [
