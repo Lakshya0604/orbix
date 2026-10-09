@@ -137,7 +137,7 @@ app.get('/api/catalog', (_q, r) => r.json(readCatalog()));
 const healthLimiter = rateLimit({ windowMs: 60 * 1000, limit: 6, standardHeaders: true, legacyHeaders: false });
 app.get('/api/catalog/health', auth, healthLimiter, wrap(async (q, r) => {
   const force = q.query.force === '1';
-  r.json(await Promise.all(readCatalog().servers.map(e => mcp.probe(e, force))));
+  r.json(await Promise.all(readCatalog().servers.map(e => e.auth === 'none' ? mcp.probe(e, force) : { id: e.id, ok: null, keyed: true })));
 }));
 // proxy for one-tap downloads of tool results (auth required, public https only, size capped)
 app.get('/api/download', auth, wrap(async (q, r) => {
@@ -191,7 +191,7 @@ const view = (s, userId) => ({ id: String(s._id), name: s.name, url: s.url, cata
 app.get('/api/servers', auth, wrap(async (q, r) => r.json((await Server.find({ userId: q.user._id }).sort('createdAt')).map(s => view(s, q.user._id)))));
 app.post('/api/servers', auth, wrap(async (q, r) => {
   let { catalogId, name, url, apiKey, authHeader, transport } = q.body || {};
-  if (catalogId) { const c = readCatalog().servers.find(x => x.id === catalogId); if (!c) throw bad('Unknown catalog server.'); name = c.name; url = c.url; transport = c.transport; authHeader = c.authHeader; }
+  if (catalogId) { const c = readCatalog().servers.find(x => x.id === catalogId); if (!c) throw bad('Unknown catalog server.'); name = c.name; url = c.url; transport = c.transport; authHeader = c.authHeader; if (c.auth !== 'none' && !apiKey) throw bad('This server needs your own token. Paste it first.'); }
   if (q.user.isGuest && !catalogId) throw bad('Create a free account to add your own servers.', 403);
   if (!name || !url) throw bad('Give the server a name and URL.');
   await assertPublicUrl(url).catch(e => { throw bad(e.message); });
