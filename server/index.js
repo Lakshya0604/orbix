@@ -332,7 +332,7 @@ app.get('/api/health/image', wrap(async (q, r) => {
   imgHealth = { at: Date.now(), v }; r.json(v);
 }));
 app.get('/api/videos', auth, wrap(async (q, r) => r.json({ enabled: imageEnabled(), jobs: (await VideoJob.find({ userId: q.user._id }).sort('-createdAt').limit(20)).map(publicJob) })));
-app.post('/api/videos', auth, wrap(async (q, r) => { if (!imageEnabled()) throw bad('Video is not configured.'); if (q.user.isGuest) throw bad('Create an account first.', 403); r.status(201).json(publicJob(await startJob(q.user._id, q.body?.topic))); }));
+app.post('/api/videos', auth, wrap(async (q, r) => { if (!imageEnabled()) throw bad('Video is not configured.'); if (q.user.isGuest) throw bad('Create an account first.', 403); r.status(201).json(publicJob(await startJob(q.user._id, q.body?.topic, !!q.body?.long))); }));
 app.get('/api/videos/:id/file', auth, wrap(async (q, r) => {
   const job = await VideoJob.findOne({ _id: q.params.id, userId: q.user._id }); if (!job || job.status !== 'done') throw bad('Not ready.', 404);
   const b = await VideoBlob.findOne({ jobId: job._id, kind: 'final' }); if (!b) throw bad('File missing.', 404);
@@ -343,9 +343,9 @@ app.delete('/api/videos/:id', auth, wrap(async (q, r) => { const job = await Vid
 const SELFTEST = new mongoose.Types.ObjectId('000000000000000000000001');
 app.get('/api/health/pipeline', wrap(async (q, r) => {
   if (!imageEnabled()) return r.json({ configured: false });
-  const want = q.query.lang === 'hi' ? 'चाँद पर इंसान के पहले कदम की कहानी' : 'a lighthouse on a stormy coast at night';
+  const wantLong = q.query.long === '1'; const want = wantLong ? 'a lonely lighthouse keeper who hears knocking from inside the locked tower door' : q.query.lang === 'hi' ? 'चाँद पर इंसान के पहले कदम की कहानी' : 'a lighthouse on a stormy coast at night';
   let job = await VideoJob.findOne({ userId: SELFTEST }).sort('-createdAt');
-  if (!job || job.topic !== want || (job.status === 'done' && !/vertical/.test(job.note || '')) || (Date.now() - new Date(job.createdAt) > 3600000 && ['done', 'failed'].includes(job.status)) || (job.status === 'failed' && Date.now() - new Date(job.createdAt) > 300000) || (!['done', 'failed'].includes(job.status) && Date.now() - new Date(job.createdAt) > 480000)) { await VideoJob.deleteMany({ userId: SELFTEST }); job = await startJob(SELFTEST, want); }
+  if (!job || job.topic !== want || !!job.long !== wantLong || (job.status === 'done' && !/vertical/.test(job.note || '')) || (Date.now() - new Date(job.createdAt) > 3600000 && ['done', 'failed'].includes(job.status)) || (job.status === 'failed' && Date.now() - new Date(job.createdAt) > 300000) || (!['done', 'failed'].includes(job.status) && Date.now() - new Date(job.createdAt) > 480000)) { await VideoJob.deleteMany({ userId: SELFTEST }); job = await startJob(SELFTEST, want, wantLong); }
   r.json({ ...publicJob(job), final: job.status === 'done' ? (await VideoBlob.findOne({ jobId: job._id, kind: 'final' }).select('_id').lean()) ? 'stored' : 'missing' : null });
 }));
 app.get('/api/health/agnes', wrap(async (q, r) => {
@@ -355,6 +355,7 @@ app.get('/api/health/agnes', wrap(async (q, r) => {
   try { const c = await fetch('https://apihub.agnes-ai.com/v1/videos', { method: 'POST', headers: H, body: JSON.stringify({ model: 'agnes-video-v2.0', prompt: 'a red balloon floating up in a blue sky', width: 576, height: 1024, num_frames: 97, frame_rate: 24 }), signal: AbortSignal.timeout(20000) }); const t = await c.text(); out.create = { status: c.status, body: t.replace(/\s+/g, ' ').replace(key, '***').slice(0, 500) }; } catch (e) { out.create = { error: e.message.slice(0, 100) }; }
   r.json(out);
 }));
+app.get('/api/health/pipeline/script', wrap(async (q, r) => { const job = await VideoJob.findOne({ userId: SELFTEST }).sort('-createdAt'); r.json(job ? { topic: job.topic, title: job.title, long: job.long, status: job.status, stage: job.stage, scenes: job.scenes.map(x => ({ act: x.act, kw: x.kw, state: x.state, say: x.say })) } : {}); }));
 app.get('/api/health/pipeline/file', wrap(async (q, r) => { const job = await VideoJob.findOne({ userId: SELFTEST, status: 'done' }).sort('-createdAt'); const b = job && await VideoBlob.findOne({ jobId: job._id, kind: 'final' }); if (!b) throw bad('No self-test video yet.', 404); r.set({ 'content-type': 'video/mp4', 'content-length': b.data.length }).send(b.data); }));
 let vidHealth = { at: 0 };
 app.get('/api/health/video', wrap(async (q, r) => {
