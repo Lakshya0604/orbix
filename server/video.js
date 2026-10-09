@@ -46,7 +46,7 @@ async function script(job) {
       let got = null;
       for (let t = 0; t < 5 && !got; t++) {
         job.stage = `Writing the story: ${act}`; await job.save().catch(() => {});
-        const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: sysFor(n, `\nStory plan:\n${outline}\nWrite ONLY the "${act}" part now: exactly ${n} scenes, all with act "${act}".${acc.length ? `\nNarration so far (continue straight from it):\n${acc.map(x => x.say).join(' ')}` : ''}`) }, { role: 'user', content: `Topic: ${job.topic}` }] });
+        let m; try { m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: sysFor(n, `\nStory plan:\n${outline}\nWrite ONLY the "${act}" part now: exactly ${n} scenes, all with act "${act}".${acc.length ? `\nNarration so far (continue straight from it):\n${acc.map(x => x.say).join(' ')}` : ''}`) }, { role: 'user', content: `Topic: ${job.topic}` }] }); } catch { await new Promise(r => setTimeout(r, 6000)); continue; }
         const x = jsonOf(m.content); if (x && Array.isArray(x.scenes) && x.scenes.length >= 1) got = x.scenes.slice(0, n);
       }
       if (!got) throw new Error('The script came back broken. Try again.');
