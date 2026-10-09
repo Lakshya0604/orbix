@@ -10,6 +10,20 @@ import { chatCompletion } from './llm.js';
 import { generateClip, generateSpeech, generateAgnesClip, generateImage, generateWithReference, transcribeSong } from './media.js';
 const { Schema, model } = mongoose; const run = promisify(execFile);
 
+// Banned visual subjects: never query them and never ship them, whatever the niche.
+const BANNED = /\b(flags?|banner|war|wars|army|armies|soldiers?|military|weapons?|guns?|rifles?|bombs?|missiles?|tanks?|terror\w*|nazi\w*|isis|religio\w*|church|temple|mosque|cross|crescent|islam\w*|hindu\w*|christian\w*|jewish|jew|judaism|swastika|politic\w*|election|president|protest|nationa\w*|country|countries|israel\w*|palestin\w*|ukrain\w*|russia\w*|america\w*|usa|india\w*|china|chinese|pakistan\w*|trump|modi|biden|putin|blood|corpse|kill\w*|flagpole|patriot\w*|anthem|emblem|star of david)\b/i;
+// Subject synonyms tried when the exact subject has no stock hit, before any abstract fallback.
+const SYN = { astronaut: ['spaceman', 'cosmonaut', 'space suit'], moon: ['lunar surface', 'full moon', 'moonlight'], lighthouse: ['beacon', 'sea tower', 'coast night'], forest: ['woods', 'woodland', 'pine trees'], meteor: ['shooting star', 'comet', 'night sky'], space: ['galaxy', 'stars sky', 'nebula'], ocean: ['sea waves', 'deep sea', 'underwater'], mountain: ['peaks', 'cliffs', 'highlands'], desert: ['sand dunes', 'canyon', 'arid landscape'], river: ['stream', 'waterfall', 'creek'], city: ['skyline', 'downtown', 'night streets'], train: ['railway', 'locomotive', 'railroad'], castle: ['fortress', 'old ruins', 'medieval'], tower: ['minaret old', 'clock tower', 'stone tower'], ghost: ['dark hallway', 'fog night', 'candle flame'], watchman: ['night guard', 'security guard', 'lantern night'], dog: ['puppy', 'pet dog', 'hound'], cat: ['kitten', 'pet cat', 'feline'], robot: ['android', 'machine', 'futuristic'], ship: ['sailboat', 'vessel', 'ocean wave'], car: ['night driving', 'highway', 'vehicle road'] };
+const cleanWord = w => w && !BANNED.test(w);
+const subjFirst = s => String(s || '').split(/\s+/).filter(cleanWord)[0] || '';
+// Rewrite raw LLM keywords at script time: drop banned words, keep every phrase anchored on the subject, rebuild phrases that lost everything.
+const sanitizeKw = (kw, subject) => {
+  const first = subjFirst(subject);
+  const phrases = String(kw || '').split('|').map(p => p.split(/\s+/).filter(cleanWord).join(' ').trim()).map(p => first && p && !p.toLowerCase().includes(first.toLowerCase()) ? `${first} ${p}` : p).filter(p => p.split(/\s+/).filter(Boolean).length >= 2);
+  return (phrases.length ? phrases : [first ? `${first} close up` : 'nature sky']).slice(0, 3).join('|').slice(0, 110);
+};
+
+
 export const VideoJob = model('VideoJob', new Schema({
   userId: { type: Schema.Types.ObjectId, index: true }, topic: String, title: { type: String, default: '' },
   status: { type: String, default: 'queued', index: true }, // queued, scripting, clips, stitching, done, failed
@@ -106,7 +120,7 @@ async function script(job) {
   if (!j) throw new Error('The script came back broken. Try again. [' + why + ']'); }
   if (!j) throw new Error('The script came back broken. Try again.');
   job.subject = String(j.subject || '').replace(/[^\w ]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
-  const scenes = j.scenes.map(x => typeof x === 'string' ? { act: '', shot: x, kw: '', say: '' } : { act: String(x?.act || ''), shot: String(x?.shot || ''), kw: String(x?.kw || ''), say: String(x?.say || '') }).filter(x => x.shot).slice(0, N).map(x => ({ act: x.act.slice(0, 12), prompt: x.shot.slice(0, 400), kw: x.kw.replace(/[^\w |]/g, ' ').slice(0, 110).trim(), say: x.say.slice(0, 320) }));
+  const scenes = j.scenes.map(x => typeof x === 'string' ? { act: '', shot: x, kw: '', say: '' } : { act: String(x?.act || ''), shot: String(x?.shot || ''), kw: String(x?.kw || ''), say: String(x?.say || '') }).filter(x => x.shot).slice(0, N).map(x => ({ act: x.act.slice(0, 12), prompt: x.shot.slice(0, 400), kw: sanitizeKw(x.kw.replace(/[^\w |]/g, ' '), job.subject), say: x.say.slice(0, 320) }));
   if (scenes.length < 2) throw new Error('The script came back empty. Try another topic.');
   job.title = String(job.title || j.title || job.topic).slice(0, 80); job.scenes = scenes; job.status = 'clips'; job.stage = `Story ready: ${scenes.length} scenes`; await job.save();
 }
@@ -180,7 +194,6 @@ async function stillClip(prompt, i, given) {
 }
 
 // Stock fallback (free Pixabay API key): real stock footage for the scene keywords, cropped to 9:16 and trimmed to 4.5 s.
-const BANNED = /\b(flags?|banner|war|wars|army|armies|soldiers?|military|weapons?|guns?|rifles?|bombs?|missiles?|tanks?|terror\w*|nazi\w*|isis|religio\w*|church|temple|mosque|cross|crescent|islam\w*|hindu\w*|christian\w*|jewish|jew|judaism|swastika|politic\w*|election|president|protest|nationa\w*|country|countries|israel\w*|palestin\w*|ukrain\w*|russia\w*|america\w*|usa|india\w*|china|chinese|pakistan\w*|trump|modi|biden|putin|blood|corpse|kill\w*|flagpole|patriot\w*|anthem|emblem|star of david)\b/i;
 const ANIM = /animat|cartoon|anime|एनिमेट|कार्टून/i;
 const staticClip = async f => { try { const { stderr } = await run(ffmpegPath, ['-i', f, '-vf', 'scale=96:-2,freezedetect=n=0.004:d=1.5', '-an', '-f', 'null', '-'], { timeout: 30000 }); return /freeze_start/.test(String(stderr || '')); } catch { return false; } };
 async function stockClip(job, i) {
@@ -194,7 +207,7 @@ async function stockClip(job, i) {
   const encode = async (src, out, flip) => run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', src, '-t', '4.5', '-an', '-threads', '1', '-vf', `${flip ? 'hflip,scale=' + Math.round(W * 1.3) + ':' + Math.round(H * 1.3) + ',crop=' + W + ':' + H + ',' : ''}scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=24,format=yuv420p`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-movflags', '+faststart', out], { timeout: 90000 });
   try {
     for (let k = 0; k < K; k++) {
-      const words = queries[k].split(/\s+/).filter(Boolean); const tries = [queries[k], words.slice(0, 2).join(' '), subj || words[0] || 'nature', 'nature'].filter((q, n, a) => q && a.indexOf(q) === n);
+      const words = queries[k].split(/\s+/).filter(Boolean); const syns = SYN[(subj.split(' ')[0] || '').toLowerCase()] || []; const tries = [queries[k], words.slice(0, 2).join(' '), ...syns.slice(0, 3), subj || words[0] || 'nature', 'nature'].filter((q, n, a) => q && a.indexOf(q) === n);
       let ok = false, lastSrc = null, weak = null;
       for (const q of tries) {
         if (ok) break; await mark(`search ${k + 1}/${K}`);
