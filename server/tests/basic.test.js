@@ -16,3 +16,8 @@ test('catalog only holds verified entries', () => {
   assert.ok(c.servers.length > 0);
   for (const s of c.servers) { assert.equal(s.status, 'verified'); assert.ok(s.url.startsWith('https://')); assert.ok(['none', 'key'].includes(s.auth)); }
 });
+import { cleanSchema } from '../agent.js';
+test('schema refs are inlined for Groq', () => {
+  const o = cleanSchema({ type: 'object', properties: { a: { $ref: '#/$defs/F' } }, $defs: { F: { type: 'object', properties: { x: { type: 'string' } } } } });
+  assert.equal(o.properties.a.properties.x.type, 'string'); assert.ok(!JSON.stringify(o).includes('$ref'));
+});
