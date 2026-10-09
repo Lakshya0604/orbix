@@ -191,6 +191,7 @@ const view = (s, userId) => ({ id: String(s._id), name: s.name, url: s.url, cata
 app.get('/api/servers', auth, wrap(async (q, r) => r.json((await Server.find({ userId: q.user._id }).sort('createdAt')).map(s => view(s, q.user._id)))));
 app.post('/api/servers', auth, wrap(async (q, r) => {
   let { catalogId, name, url, apiKey, authHeader, transport } = q.body || {};
+  if (typeof apiKey === 'string') apiKey = apiKey.replace(/^\s*bearer\s+/i, '').replace(/\s+/g, '') || undefined;
   if (catalogId) { const c = readCatalog().servers.find(x => x.id === catalogId); if (!c) throw bad('Unknown catalog server.'); name = c.name; url = c.url; transport = c.transport; authHeader = c.authHeader; if (c.auth !== 'none' && !apiKey) throw bad('This server needs your own token. Paste it first.'); }
   if (q.user.isGuest && !catalogId) throw bad('Create a free account to add your own servers.', 403);
   if (!name || !url) throw bad('Give the server a name and URL.');
