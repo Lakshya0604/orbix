@@ -41,7 +41,7 @@ export default function Hub({ user, dark, setDark, logout }) {
   const [servers, setServers] = useState([]);
   const [catalog, setCatalog] = useState({ servers: [], rejected: [] });
   const [health, setHealth] = useState({});
-  const [chats, setChats] = useState([]); const [docs, setDocs] = useState([]); const [upBusy, setUpBusy] = useState(false); const [attach, setAttach] = useState(false); const [lastDoc, setLastDoc] = useState(null); const fileRef = useRef(null);
+  const [chats, setChats] = useState([]); const [docs, setDocs] = useState([]); const [upBusy, setUpBusy] = useState(false); const [attach, setAttach] = useState(false); const [lastDoc, setLastDoc] = useState(null); const [att, setAtt] = useState(null); const picRef = useRef(null); const vidRef = useRef(null); const [mem, setMem] = useState({ memory: '', off: false }); const fileRef = useRef(null);
   const [chatId, setChatId] = useState(null);
   const [msgs, setMsgs] = useState([]);
   const [live, setLive] = useState(null); // {steps, status}
@@ -88,6 +88,28 @@ export default function Hub({ user, dark, setDark, logout }) {
     try { const r = await fetch(`/api/docs?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token()}` }, body: f }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Upload failed'); setLastDoc({ name: j.name, chunks: j.chunks }); say(`${j.name} added (${j.chunks} parts)`); loadDocs(); } catch (x) { setLastDoc({ error: x.message }); say(x.message); }
     setUpBusy(false);
   };
+  const snapFrame = (src, w, h) => { const k = Math.min(1, 896 / Math.max(w, h)); const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k); c.getContext('2d').drawImage(src, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.72); };
+  const framesOf = file => new Promise((res, rej) => {
+    const url = URL.createObjectURL(file); const done = (v, e) => { URL.revokeObjectURL(url); e ? rej(e) : res(v); };
+    if (file.type.startsWith('image/')) { const im = new Image(); im.onload = () => done([snapFrame(im, im.naturalWidth, im.naturalHeight)]); im.onerror = () => done(null, new Error('This picture format cannot be read here. Try a JPG or PNG.')); im.src = url; return; }
+    const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; const out = []; let i = 0; const timer = setTimeout(() => done(null, new Error('This video took too long to read. Try a shorter one.')), 25000);
+    v.onerror = () => { clearTimeout(timer); done(null, new Error('This video format cannot be read here. Try MP4.')); };
+    v.onloadedmetadata = () => { v.currentTime = Math.min(0.1, v.duration / 2); };
+    v.onseeked = () => { out.push(snapFrame(v, v.videoWidth, v.videoHeight)); i++; if (i >= 4 || !isFinite(v.duration)) { clearTimeout(timer); done(out); } else v.currentTime = Math.min(v.duration - 0.1, v.duration * [0.1, 0.35, 0.65, 0.95][i]); };
+    v.src = url;
+  });
+  const attachMedia = async (e, kind) => {
+    const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
+    if (f.size > 200 * 1024 * 1024) { say('That file is too big. Use one under 200 MB.'); return; }
+    setAtt({ name: f.name, kind, busy: true }); setLastDoc(null);
+    try {
+      const images = await framesOf(f);
+      const r = await fetch('/api/vision', { method: 'POST', headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token()}` }, body: JSON.stringify({ images, frames: kind === 'video' }) }); const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'Could not read it');
+      setAtt({ name: f.name, kind, summary: j.summary }); orbi('happy', 'Got it, ask me about it!', 3000);
+    } catch (x) { setAtt({ name: f.name, kind, error: x.message }); }
+  };
+  const loadMem = useCallback(async () => setMem(await api('/api/me/memory').catch(() => ({ memory: '', off: false }))), []);
   const soon = what => { setAttach(false); say(`${what} understanding is coming in the next update. Documents work now.`); };
   const removeDoc = async id => { await api(`/api/docs/${id}`, { method: 'DELETE' }); loadDocs(); };
   const loadChats = useCallback(async () => setChats(await api('/api/chats')), []);
@@ -120,7 +142,7 @@ export default function Hub({ user, dark, setDark, logout }) {
     setText(''); setBusy(true); if (user.guest) setLeft(l => l - 1); setMsgs(m => [...m, { role: 'user', content: message }]); setLive({ steps: [], status: 'Thinking…' });
     const ctrl = new AbortController(); abort.current = ctrl; let steps = [], answer = '', err = '';
     try {
-      await stream('/api/chat', { method: 'POST', body: { chatId, message }, signal: ctrl.signal, onEvent: ev => {
+      await stream('/api/chat', { method: 'POST', body: { chatId, message, attached: att?.summary || undefined }, signal: ctrl.signal, onEvent: ev => {
         if (ev.type === 'chat') setChatId(ev.id);
         else if (ev.type === 'thinking') setLive(l => ({ ...l, status: 'Thinking…' }));
         else if (ev.type === 'tool_call') { steps = [...steps, { id: ev.id, server: ev.server, tool: ev.tool, status: 'running' }]; setLive({ steps, status: `Using ${ev.server}…` }); }
@@ -157,7 +179,7 @@ export default function Hub({ user, dark, setDark, logout }) {
       <div className="layout">
         <aside className={`side ${drawer ? 'open' : ''}`}>
           <div className="tabs" role="tablist">
-            {[['servers', `Servers · ${connectedCount}`], ['catalog', `Catalog · ${catalog.servers.length}`], ['chats', `Chats · ${chats.length}`], ['docs', `Docs · ${docs.length}`], ['videos', `Videos · ${vids.jobs.length}`], ['hf', 'Playground']].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
+            {[['servers', `Servers · ${connectedCount}`], ['catalog', `Catalog · ${catalog.servers.length}`], ['chats', `Chats · ${chats.length}`], ['docs', `Docs · ${docs.length}`], ['videos', `Videos · ${vids.jobs.length}`], ['hf', 'Playground'], ['memory', 'Memory']].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => { setTab(k); if (k === 'memory') loadMem(); }}>{l}</button>)}
           </div>
           <div className="side-body">
           {tab === 'servers' && <section>
@@ -206,6 +228,11 @@ export default function Hub({ user, dark, setDark, logout }) {
               {vPlay?.id === j.id && <video src={vPlay.url} controls playsInline className="vid-player" />}
             </div>)}
             {!vids.jobs.length && <p className="empty">{vids.enabled ? 'No videos yet. Type a topic above.' : 'Video is not switched on for this app yet.'}</p>}
+          </section>}
+          {tab === 'memory' && <section>
+            <p className="hint">Orbix keeps a short note about you across chats (your name, goals, preferences) so you do not repeat yourself. It never stores passwords or keys. You can clear it or turn it off.</p>
+            <pre className="hf-out">{mem.memory || 'Nothing remembered yet. Chat a bit and it fills in.'}</pre>
+            <div className="vid-act"><button className="btn ghost sm" onClick={async () => setMem(await api('/api/me/memory', { method: 'POST', body: { clear: true } }))}>Clear memory</button><button className="btn ghost sm" onClick={async () => setMem(await api('/api/me/memory', { method: 'POST', body: { off: !mem.off } }))}>{mem.off ? 'Turn memory on' : 'Turn memory off'}</button></div>
           </section>}
           {tab === 'hf' && <section>
             <form onSubmit={hfInspect} className="vid-form"><input value={hfModel} onChange={e => setHfModel(e.target.value)} placeholder="Paste a Hugging Face Space or model link" /><button className="btn primary sm" disabled={hfBusy || hfModel.trim().length < 3}>{hfBusy === 'inspect' ? '…' : 'Load'}</button></form>
@@ -263,14 +290,16 @@ export default function Hub({ user, dark, setDark, logout }) {
             <div ref={bottom} />
           </div>
           {lastDoc && <div className="doc-chip" style={lastDoc.error ? { borderColor: '#e5484d' } : undefined}><span>{lastDoc.error ? <>⚠️ Upload failed: {lastDoc.error}</> : <>📄 <b>{lastDoc.name}</b> ready · {lastDoc.chunks} parts. Ask a question about it.</>}</span><button type="button" className="x" onClick={() => setLastDoc(null)} aria-label="Dismiss">×</button></div>}
+          {att && <div className="doc-chip" style={att.error ? { borderColor: '#e5484d' } : undefined}><span>{att.busy ? <>⏳ Reading {att.name}…</> : att.error ? <>⚠️ {att.error}</> : <>{att.kind === 'video' ? '🎬' : '🖼'} <b>{att.name}</b> understood. Ask about it, or say "make a video like this".</>}</span><button type="button" className="x" onClick={() => setAtt(null)} aria-label="Remove">×</button></div>}
+          <input ref={picRef} type="file" hidden accept="image/*" onChange={e => attachMedia(e, 'photo')} /><input ref={vidRef} type="file" hidden accept="video/*" onChange={e => attachMedia(e, 'video')} />
           <input ref={fileRef} type="file" hidden accept=".pdf,.docx,.txt,.md,.csv,.json,.html,.log" onChange={upload} />
           <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
             <div className="attach">
               <button type="button" className="attach-btn" aria-label="Attach" aria-expanded={attach} disabled={upBusy} onClick={() => setAttach(a => !a)}>{upBusy ? '…' : '+'}</button>
               {attach && <><div className="attach-scrim" onClick={() => setAttach(false)} /><div className="attach-menu" role="menu">
                 <button type="button" role="menuitem" onClick={() => { setAttach(false); fileRef.current?.click(); }}><span>📄</span><b>Document</b><small>PDF, DOCX, TXT, CSV · up to 25 MB</small></button>
-                <button type="button" role="menuitem" onClick={() => soon('Photo')}><span>🖼</span><b>Photo</b><small>coming soon</small></button>
-                <button type="button" role="menuitem" onClick={() => soon('Video')}><span>🎬</span><b>Video</b><small>coming soon</small></button>
+                <button type="button" role="menuitem" onClick={() => { setAttach(false); picRef.current?.click(); }}><span>🖼</span><b>Photo</b><small>ask about it, read its text</small></button>
+                <button type="button" role="menuitem" onClick={() => { setAttach(false); vidRef.current?.click(); }}><span>🎬</span><b>Video</b><small>ask about it, make one like it</small></button>
               </div></>}
             </div>
             <textarea rows={1} value={text} onChange={e => setText(e.target.value)} placeholder="Ask for anything your servers can do…" onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
@@ -289,4 +318,4 @@ export default function Hub({ user, dark, setDark, logout }) {
       <AnimatePresence>{toast && <motion.div className="toast" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
     </div>
   );
-}
+            }
