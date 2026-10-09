@@ -12,7 +12,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root"><div id="bootl" style="position:fixed;inset:0;display:grid;place-items:center;background:#faf6ef;z-index:9999"><div style="text-align:center;font-family:system-ui,sans-serif;color:#6f6a80"><div class="ib"></div><div class="ibt">Loading Orbix…</div></div></div></div>
+  <style>.ib{width:56px;height:56px;margin:0 auto 14px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#b79cff,#6d3bff);box-shadow:0 0 0 0 rgba(109,59,255,.45);animation:ibp 1.4s ease-in-out infinite}@keyframes ibp{0%,100%{transform:translateY(0);box-shadow:0 0 0 0 rgba(109,59,255,.4)}50%{transform:translateY(-8px);box-shadow:0 0 0 18px rgba(109,59,255,0)}}.ibt{font-size:14px;font-weight:600}@media(prefers-color-scheme:dark){#bootl{background:#110f1c!important}}</style>
   <script type="module" src="/src/main.jsx"></script>
 </body>
 </html>
