@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-09T05:02:16.672Z",
+  "updatedAt": "2026-10-09T06:22:47.661Z",
   "servers": [
     {
       "id": "deepwiki",
@@ -208,7 +208,255 @@
         "Make a 2 second video of a red balloon floating over a lake at sunrise",
         "Generate a short video of rain on a neon city street"
       ]
+    },
+    {
+      "id": "microsoft-learn",
+      "name": "Microsoft Learn",
+      "url": "https://learn.microsoft.com/api/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "docs",
+        "code",
+        "microsoft"
+      ],
+      "description": "Search official Microsoft and Azure docs and code samples.",
+      "examples": [
+        "How do I deploy an Azure Function with Node.js?",
+        "Show a C# sample for Azure Blob Storage upload"
+      ],
+      "toolCount": 3,
+      "sampleTools": [
+        "microsoft_docs_search",
+        "microsoft_code_sample_search",
+        "microsoft_docs_fetch"
+      ],
+      "smoke": "passed",
+      "testedAt": "2026-10-09",
+      "status": "verified"
+    },
+    {
+      "id": "parallel-search",
+      "name": "Parallel Web Search",
+      "url": "https://search.parallel.ai/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "search",
+        "web"
+      ],
+      "description": "Free web search and page fetching built for AI agents.",
+      "examples": [
+        "Search the web for the latest MCP spec changes",
+        "Fetch and summarise https://modelcontextprotocol.io"
+      ],
+      "toolCount": 2,
+      "sampleTools": [
+        "web_search",
+        "web_fetch"
+      ],
+      "smoke": "passed",
+      "testedAt": "2026-10-09",
+      "status": "verified"
+    },
+    {
+      "id": "astro-docs",
+      "name": "Astro Docs",
+      "url": "https://mcp.docs.astro.build/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "docs",
+        "code"
+      ],
+      "description": "Search the official Astro framework documentation.",
+      "examples": [
+        "How do Astro content collections work?"
+      ],
+      "toolCount": 1,
+      "sampleTools": [
+        "search_astro_docs"
+      ],
+      "smoke": "passed",
+      "testedAt": "2026-10-09",
+      "status": "verified"
+    },
+    {
+      "id": "svelte",
+      "name": "Svelte Docs",
+      "url": "https://mcp.svelte.dev/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "docs",
+        "code"
+      ],
+      "description": "Svelte and SvelteKit docs plus a code checker.",
+      "examples": [
+        "Explain Svelte 5 runes with an example"
+      ],
+      "toolCount": 4,
+      "sampleTools": [
+        "get-documentation",
+        "list-sections",
+        "playground-link",
+        "svelte-autofixer"
+      ],
+      "smoke": "passed",
+      "testedAt": "2026-10-09",
+      "status": "verified"
+    },
+    {
+      "id": "blockchain-boar",
+      "name": "Boar Blockchain",
+      "url": "https://mcp.boar.network/basic",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "crypto",
+        "data"
+      ],
+      "description": "Read-only Bitcoin and Ethereum chain data.",
+      "examples": [
+        "What is the latest Ethereum block?"
+      ],
+      "toolCount": 46,
+      "sampleTools": [
+        "eth_get_balance",
+        "eth_get_block",
+        "eth_get_transaction",
+        "eth_get_logs",
+        "eth_gas_price",
+        "eth_estimate_gas",
+        "eth_get_transaction_receipt",
+        "eth_get_code"
+      ],
+      "smoke": "passed",
+      "testedAt": "2026-10-09",
+      "status": "verified"
+    },
+    {
+      "id": "kiwi-flights",
+      "name": "Kiwi.com Flights",
+      "url": "https://mcp.kiwi.com",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "travel"
+      ],
+      "description": "Search flights and prices.",
+      "examples": [
+        "Cheapest flight Delhi to Bengaluru next Friday"
+      ],
+      "toolCount": 2,
+      "sampleTools": [
+        "search-flight",
+        "feedback-to-devs"
+      ],
+      "smoke": "passed",
+      "testedAt": "2026-10-09",
+      "status": "verified"
+    },
+    {
+      "id": "youtube-transcript",
+      "name": "YouTube Transcripts",
+      "url": "https://youtube-transcript.ai/mcp",
+      "transport": "http",
+      "auth": "none",
+      "tags": [
+        "video",
+        "youtube"
+      ],
+      "description": "Get the transcript of any YouTube video (no API key).",
+      "examples": [
+        "Summarise this YouTube video: https://youtu.be/dQw4w9WgXcQ"
+      ],
+      "toolCount": 1,
+      "sampleTools": [
+        "get_youtube_transcript"
+      ],
+      "smoke": "passed",
+      "testedAt": "2026-10-09",
+      "status": "verified"
     }
   ],
-  "rejected": []
+  "rejected": [
+    {
+      "id": "semgrep",
+      "name": "Semgrep",
+      "url": "https://mcp.semgrep.ai/mcp",
+      "error": "needs login (401)",
+      "testedAt": "2026-10-09"
+    },
+    {
+      "id": "web-fetch",
+      "name": "Web Fetch",
+      "url": "https://remote.mcpservers.org/fetch/mcp",
+      "error": "host does not exist (DNS lookup failed)",
+      "testedAt": "2026-10-09"
+    },
+    {
+      "id": "sequential-thinking",
+      "name": "Sequential Thinking",
+      "url": "https://remote.mcpservers.org/sequentialthinking/mcp",
+      "error": "host does not exist (DNS lookup failed)",
+      "testedAt": "2026-10-09"
+    },
+    {
+      "id": "bulktranscripts",
+      "name": "YouTube Search + Transcripts",
+      "url": "https://bulktranscripts.co/mcp",
+      "error": "SSE error: Non-200 status code (405)",
+      "testedAt": "2026-10-09"
+    },
+    {
+      "id": "open-meteo",
+      "name": "Open-Meteo Weather",
+      "url": "https://mcp.open-meteo.com/mcp",
+      "error": "host does not exist (DNS lookup failed)",
+      "testedAt": "2026-10-09"
+    },
+    {
+      "id": "hf-flux",
+      "name": "FLUX.1 Image (HF Space)",
+      "url": "https://black-forest-labs-flux-1-schnell.hf.space/gradio_api/mcp/",
+      "error": "SSE error: Non-200 status code (404)",
+      "testedAt": "2026-10-09"
+    },
+    {
+      "id": "hf-kokoro",
+      "name": "Kokoro Text-to-Speech (HF Space)",
+      "url": "https://hexgrad-kokoro-tts.hf.space/gradio_api/mcp/",
+      "error": "SSE error: Non-200 status code (404)",
+      "testedAt": "2026-10-09"
+    },
+    {
+      "id": "hf-sd-turbo",
+      "name": "Stable Diffusion Turbo (HF Space)",
+      "url": "https://stabilityai-stable-diffusion-3-5-large-turbo.hf.space/gradio_api/mcp/",
+      "error": "SSE error: Non-200 status code (404)",
+      "testedAt": "2026-10-09"
+    },
+    {
+      "id": "mcp-time",
+      "name": "Time and Timezones",
+      "url": "https://remote.mcpservers.org/time/mcp",
+      "error": "host does not exist (DNS lookup failed)",
+      "testedAt": "2026-10-09"
+    },
+    {
+      "id": "mcp-everything",
+      "name": "Everything Test Server",
+      "url": "https://remote.mcpservers.org/everything/mcp",
+      "error": "host does not exist (DNS lookup failed)",
+      "testedAt": "2026-10-09"
+    },
+    {
+      "id": "jina",
+      "name": "Jina Reader",
+      "url": "https://mcp.jina.ai/v1",
+      "error": "connects and lists tools but tool calls return 401 without an API key",
+      "testedAt": "2026-10-09"
+    }
+  ]
 }
