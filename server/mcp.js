@@ -83,7 +83,7 @@ export async function connect(userId, doc) {
 
 export function humanError(e) {
   const m = String(e?.message || e);
-  if (/401|403|unauthor|invalid_token|authentication/i.test(m)) return 'The server asked for credentials. Add or fix the API key.';
+  if (/401|403|unauthor|invalid_token|authentication/i.test(m)) return 'The server rejected the token (401). Re-copy it with no spaces, check it has not expired, then remove this server and add it again.';
   if (/ENOTFOUND|getaddrinfo/i.test(m)) return 'The server address could not be found.';
   if (/timed out/i.test(m)) return 'The server took too long to answer.';
   return m.replace(/\s+/g, ' ').slice(0, 160);
