@@ -4,7 +4,7 @@ import { api, stream } from './api.js';
 import Tilt from './Tilt.jsx';
 import Orbit3D from './Orbit3D.jsx';
 import { orbi, orbiContext } from './Mascot.jsx';
-import { Answer, Steps, saveText } from './parts.jsx';
+import { Answer, Steps, saveText, copyText, chatToText } from './parts.jsx';
 
 const SUGGEST = [
   'Make a 2 second video of a red balloon floating over a lake at sunrise',
@@ -84,6 +84,7 @@ export default function Hub({ user, dark, setDark, logout }) {
   const toggle = async s => { await api(`/api/servers/${s.id}`, { method: 'PATCH', body: { enabled: !s.enabled } }); loadServers(); };
   const checkHealth = async (force) => { setChecking(true); try { const r = await api(`/api/catalog/health${force ? '?force=1' : ''}`); setHealth(Object.fromEntries(r.map(x => [x.id, x]))); } catch (e) { say(e.message); } setChecking(false); };
 
+  const copyChat = async () => { const ok = await copyText(chatToText(msgs.find(m => m.role === 'user')?.content?.slice(0, 80), msgs)); say(ok ? 'Chat copied' : 'Copy blocked - use Save answer'); };
   const share = async () => { try { const r = await api(`/api/chats/${chatId}/share`, { method: 'POST' }); setShareUrl(r.url); try { await navigator.clipboard.writeText(r.url); say('Share link copied'); } catch { say('Share link ready below'); } } catch (e) { say(e.message); } };
   const openChat = async id => { setShareUrl(''); setChatId(id); setDrawer(false); setMsgs((await api(`/api/chats/${id}`)).messages); };
   const newChat = () => { setShareUrl(''); setChatId(null); setMsgs([]); setDrawer(false); };
@@ -179,7 +180,7 @@ export default function Hub({ user, dark, setDark, logout }) {
 
         <main className="center">
           {user.guest && <div className="guestbar">Demo mode · {left} free {left === 1 ? 'task' : 'tasks'} left · <a href="#/signup" onClick={logout}>Create a free account</a> for unlimited chats and your own servers</div>}
-          {chatId && !busy && msgs.length > 0 && !user.guest && <div className="sharebar"><button className="chip" onClick={share}>🔗 Share this chat</button>{shareUrl && <input readOnly value={shareUrl} onFocus={e => e.target.select()} />}</div>}
+          {chatId && !busy && msgs.length > 0 && !user.guest && <div className="sharebar"><button className="chip" onClick={share}>🔗 Share this chat</button><button className="chip" onClick={copyChat}>📋 Copy chat</button>{shareUrl && <input readOnly value={shareUrl} onFocus={e => e.target.select()} />}</div>}
           <div className="thread">
             {!msgs.length && !live && (
               <motion.div className="hero" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
