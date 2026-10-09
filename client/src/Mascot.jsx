@@ -71,7 +71,7 @@ export default function Mascot({ canChat, hidden }) {
       <AnimatePresence>
         {say && !open && <motion.div key={say} className="orbi-bubble" initial={{ opacity: 0, y: 8, scale: .92 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }}>{say}</motion.div>}
       </AnimatePresence>
-      <button className="orbi-btn" onClick={() => (canChat ? setOpen(!open) : react('wave', 'Create an account or try the demo to chat with me!'))} aria-label="Talk to Orbi"><Face mood={mood} /></button>
+      <button className="orbi-btn" onClick={() => (canChat ? setOpen(!open) : react('wave', 'Create an account to chat with me!'))} aria-label="Talk to Orbi"><Face mood={mood} /></button>
     </div>
   );
 }
