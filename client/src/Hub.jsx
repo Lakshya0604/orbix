@@ -83,23 +83,25 @@ export default function Hub({ user, dark, setDark, logout }) {
   const upload = async e => {
     const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
     if (f.size > 25 * 1024 * 1024) { say('File is over 25 MB.'); return; }
-    if (/\.(png|jpe?g|webp|gif|heic|mp4|mov|webm)$/i.test(f.name) || /^(image|video)\//.test(f.type)) { say('Photos and videos cannot be read yet. Upload a PDF, DOCX, TXT, MD or CSV.'); return; }
+    if (isMedia(f)) { attachMedia({ target: { files: [f], value: '' } }); return; }
     setUpBusy(true);
     try { const r = await fetch(`/api/docs?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token()}` }, body: f }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Upload failed'); setLastDoc({ name: j.name, chunks: j.chunks }); say(`${j.name} added (${j.chunks} parts)`); loadDocs(); } catch (x) { setLastDoc({ error: x.message }); say(x.message); }
     setUpBusy(false);
   };
+  const isVid = f => /^video\//.test(f.type) || /\.(mp4|mov|m4v|webm|3gp|mkv|avi)$/i.test(f.name);
+  const isMedia = f => isVid(f) || /^image\//.test(f.type) || /\.(png|jpe?g|webp|gif|bmp|heic|heif|avif|tiff?)$/i.test(f.name);
   const snapFrame = (src, w, h) => { const k = Math.min(1, 896 / Math.max(w, h)); const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k); c.getContext('2d').drawImage(src, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.72); };
   const framesOf = file => new Promise((res, rej) => {
     const url = URL.createObjectURL(file); const done = (v, e) => { URL.revokeObjectURL(url); e ? rej(e) : res(v); };
-    if (file.type.startsWith('image/')) { const im = new Image(); im.onload = () => done([snapFrame(im, im.naturalWidth, im.naturalHeight)]); im.onerror = () => done(null, new Error('This picture format cannot be read here. Try a JPG or PNG.')); im.src = url; return; }
+    if (!isVid(file)) { const im = new Image(); im.onload = () => done([snapFrame(im, im.naturalWidth, im.naturalHeight)]); im.onerror = () => done(null, new Error(/heic|heif/i.test(file.name + file.type) ? 'This browser cannot open HEIC photos. Pick the photo from your gallery (it converts to JPG) or take a screenshot of it.' : 'This picture format cannot be read here. Try JPG, PNG, WEBP or GIF.')); im.src = url; return; }
     const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; const out = []; let i = 0; const timer = setTimeout(() => done(null, new Error('This video took too long to read. Try a shorter one.')), 25000);
     v.onerror = () => { clearTimeout(timer); done(null, new Error('This video format cannot be read here. Try MP4.')); };
     v.onloadedmetadata = () => { v.currentTime = Math.min(0.1, v.duration / 2); };
     v.onseeked = () => { out.push(snapFrame(v, v.videoWidth, v.videoHeight)); i++; if (i >= 4 || !isFinite(v.duration)) { clearTimeout(timer); done(out); } else v.currentTime = Math.min(v.duration - 0.1, v.duration * [0.1, 0.35, 0.65, 0.95][i]); };
     v.src = url;
   });
-  const attachMedia = async (e, kind) => {
-    const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
+  const attachMedia = async e => {
+    const f = e.target.files?.[0]; e.target.value = ''; if (!f) return; const kind = isVid(f) ? 'video' : 'photo';
     if (f.size > 200 * 1024 * 1024) { say('That file is too big. Use one under 200 MB.'); return; }
     setAtt({ name: f.name, kind, busy: true }); setLastDoc(null);
     try {
@@ -170,7 +172,7 @@ export default function Hub({ user, dark, setDark, logout }) {
         <button className="icon-btn menu" onClick={() => setDrawer(!drawer)} aria-label="Servers and chats">☰</button>
         <div className="brand"><span className="logo-dot" />Orbix</div>
         <div className="grow" />
-        <span className="live-pill"><span className="pulse connected" />{connectedCount} live</span>
+        <button className="icon-btn" onClick={() => { setTab('chats'); setDrawer(true); loadChats(); }} aria-label="Chat history" title="Chat history">🕘</button><span className="live-pill"><span className="pulse connected" />{connectedCount} live</span>
         <button className="icon-btn" onClick={() => setDark(!dark)} aria-label="Toggle dark mode">{dark ? '☀' : '☾'}</button>
         {user.guest && <a className="chip accent" href="#/signup" onClick={logout}>Create account</a>}
         <div className="user"><span>{user.name}</span><button className="chip" onClick={() => window.dispatchEvent(new Event('orbi-pick'))} aria-label="Change buddy" title="Change buddy">🎭 Buddy</button><button className="chip" onClick={logout}>{user.guest ? 'Exit demo' : 'Log out'}</button></div>
@@ -259,7 +261,7 @@ export default function Hub({ user, dark, setDark, logout }) {
           </section>}
           {tab === 'chats' && <section>
             <button className="chip accent block" onClick={newChat}>+ New chat</button>
-            {chats.map(c => <div key={c.id} className={`chat-row ${c.id === chatId ? 'on' : ''}`}><button onClick={() => openChat(c.id)}>{c.title}</button><button className="x" onClick={() => deleteChat(c.id)} aria-label="Delete chat">×</button></div>)}
+            {chats.map(c => <div key={c.id} className={`chat-row ${c.id === chatId ? 'on' : ''}`}><button onClick={() => openChat(c.id)}>{c.title} <small>· {new Date(c.updatedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</small></button><button className="x" onClick={() => deleteChat(c.id)} aria-label="Delete chat">×</button></div>)}
             {!chats.length && <p className="empty">Your chats will show up here.</p>}
           </section>}
           </div>
@@ -291,8 +293,8 @@ export default function Hub({ user, dark, setDark, logout }) {
           </div>
           {lastDoc && <div className="doc-chip" style={lastDoc.error ? { borderColor: '#e5484d' } : undefined}><span>{lastDoc.error ? <>⚠️ Upload failed: {lastDoc.error}</> : <>📄 <b>{lastDoc.name}</b> ready · {lastDoc.chunks} parts. Ask a question about it.</>}</span><button type="button" className="x" onClick={() => setLastDoc(null)} aria-label="Dismiss">×</button></div>}
           {att && <div className="doc-chip" style={att.error ? { borderColor: '#e5484d' } : undefined}><span>{att.busy ? <>⏳ Reading {att.name}…</> : att.error ? <>⚠️ {att.error}</> : <>{att.kind === 'video' ? '🎬' : '🖼'} <b>{att.name}</b> understood. Ask about it, or say "make a video like this".</>}</span><button type="button" className="x" onClick={() => setAtt(null)} aria-label="Remove">×</button></div>}
-          <input ref={picRef} type="file" hidden accept="image/*" onChange={e => attachMedia(e, 'photo')} /><input ref={vidRef} type="file" hidden accept="video/*" onChange={e => attachMedia(e, 'video')} />
-          <input ref={fileRef} type="file" hidden accept=".pdf,.docx,.txt,.md,.csv,.json,.html,.log" onChange={upload} />
+          <input ref={picRef} type="file" hidden accept="image/*,.heic,.heif,.avif" onChange={attachMedia} /><input ref={vidRef} type="file" hidden accept="video/*,.mov,.mp4,.webm,.m4v" onChange={attachMedia} />
+          <input ref={fileRef} type="file" hidden accept=".pdf,.docx,.txt,.md,.csv,.json,.html,.log,image/*,video/*" onChange={upload} />
           <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
             <div className="attach">
               <button type="button" className="attach-btn" aria-label="Attach" aria-expanded={attach} disabled={upBusy} onClick={() => setAttach(a => !a)}>{upBusy ? '…' : '+'}</button>
@@ -318,4 +320,4 @@ export default function Hub({ user, dark, setDark, logout }) {
       <AnimatePresence>{toast && <motion.div className="toast" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
     </div>
   );
-            }
+}
