@@ -72,7 +72,7 @@ export async function visionDescribe(images, ask, { frames = false } = {}) {
     const r = await fetch(URL_, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` }, body: JSON.stringify({ model, temperature: 0.2, max_tokens: 1400, messages: [{ role: 'user', content: [{ type: 'text', text: instr }, ...imgs.map(u => ({ type: 'image_url', image_url: { url: u } }))] }] }), signal: AbortSignal.timeout(60000) }).catch(e => ({ ok: false, status: 0, json: async () => ({ error: { message: e.message } }) }));
     const j = await r.json().catch(() => ({}));
     if (r.ok && j.choices?.[0]?.message?.content) return String(j.choices[0].message.content).replace(/<think>[\s\S]*?<\/think>/g, '').trim().slice(0, 2500);
-    errs.push(`${model.split('/').pop()}: ${String(j?.error?.message || r.status).slice(0, 90)}`);
+    errs.push(`${model.split('/').pop()}: ${String(j?.error?.message || r.status).slice(0, 330)}`);
   }
   throw new Error(`Picture understanding is not available right now (${errs.join(' | ')}).`);
 }
