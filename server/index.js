@@ -41,7 +41,7 @@ const auth = wrap(async (req, res, next) => {
 });
 
 app.get('/api/health', (_q, r) => r.json({ ok: true, db: mongoose.connection.readyState === 1 }));
-app.get('/api/config', (_q, r) => r.json({ google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET), model: !!process.env.GROQ_API_KEY }));
+app.get('/api/config', (_q, r) => r.json({ google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET), github: !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET), model: !!process.env.GROQ_API_KEY }));
 
 // ---------- auth ----------
 const emailOk = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e || '');
@@ -87,6 +87,29 @@ app.delete('/api/auth/account', auth, wrap(async (q, r) => {
 }));
 
 // ---------- Google sign-in (authorization-code flow) ----------
+// ---- GitHub sign-in (OAuth App, authorization-code flow) ----
+const ghRedirect = q => `${APP_URL || `${q.protocol}://${q.get('host')}`}/api/auth/github/callback`;
+app.get('/api/auth/github', (q, r) => {
+  if (!process.env.GITHUB_CLIENT_ID) return r.status(503).send('GitHub sign-in is not configured.');
+  const state = jwt.sign({ n: crypto.randomBytes(8).toString('hex') }, JWT_SECRET, { expiresIn: '10m' });
+  r.redirect(`https://github.com/login/oauth/authorize?${new URLSearchParams({ client_id: process.env.GITHUB_CLIENT_ID, redirect_uri: ghRedirect(q), scope: 'read:user user:email', state })}`);
+});
+app.get('/api/auth/github/callback', wrap(async (q, r) => {
+  const fail = () => r.redirect('/#/login?error=github');
+  try { jwt.verify(String(q.query.state || ''), JWT_SECRET); } catch { return fail(); }
+  if (!q.query.code) return fail();
+  const tj = await (await fetch('https://github.com/login/oauth/access_token', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ client_id: process.env.GITHUB_CLIENT_ID, client_secret: process.env.GITHUB_CLIENT_SECRET, code: String(q.query.code), redirect_uri: ghRedirect(q) }) })).json();
+  if (!tj.access_token) return fail();
+  const gh = { authorization: `Bearer ${tj.access_token}`, accept: 'application/vnd.github+json', 'user-agent': 'orbix' };
+  const me = await (await fetch('https://api.github.com/user', { headers: gh })).json();
+  const emails = await (await fetch('https://api.github.com/user/emails', { headers: gh })).json();
+  const em = Array.isArray(emails) ? (emails.find(e => e.primary && e.verified) || emails.find(e => e.verified)) : null;
+  if (!me?.id || !em?.email) return fail();
+  let u = await User.findOne({ $or: [{ githubId: String(me.id) }, { email: em.email.toLowerCase() }] });
+  if (!u) u = await User.create({ email: em.email, name: me.name || me.login || '', githubId: String(me.id) });
+  else if (!u.githubId) { u.githubId = String(me.id); await u.save(); }
+  r.redirect(`/#/auth?token=${encodeURIComponent(sign(u))}`);
+}));
 const gRedirect = q => `${APP_URL || `${q.protocol}://${q.get('host')}`}/api/auth/google/callback`;
 app.get('/api/auth/google', (q, r) => {
   if (!process.env.GOOGLE_CLIENT_ID) return r.status(503).send('Google sign-in is not configured.');
