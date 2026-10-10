@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 import { chatCompletion } from './llm.js';
-import { generateClip, generateSpeech, generateAgnesClip, generateImage, generateWithReference, transcribeSong } from './media.js';
+import { generateClip, generateSpeech, generateAgnesClip, generateImage, generateWithReference, generateInbetweens, transcribeSong } from './media.js';
 const { Schema, model } = mongoose; const run = promisify(execFile);
 
 // Banned visual subjects: never query them and never ship them, whatever the niche.
@@ -220,6 +220,16 @@ async function stillClip(prompt, i, given, dm = { W, H }, moody = false) {
 }
 
 // Manhwa recap motion: slow vertical scroll over a tall comic panel, like reading a webtoon.
+// L1 keyframe morph: two keyframes of the same scene, zoompan on each, crossfade between. Zero GPU quota.
+async function morphClip(imgA, imgB, i, dm = { W, H }) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-m-'));
+  try {
+    const a = path.join(dir, 'a.jpg'), b = path.join(dir, 'b.jpg'), out = path.join(dir, 'm.mp4');
+    await fs.writeFile(a, imgA); await fs.writeFile(b, imgB);
+    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-loop', '1', '-t', '2', '-i', a, '-loop', '1', '-t', '2', '-i', b, '-filter_complex', `[0:v]scale=1080:-2,zoompan=z='1+0.0020*on':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=96:s=${dm.W}x${dm.H}:fps=24,setsar=1[v0];[1:v]scale=1080:-2,zoompan=z='1.10-0.0020*on':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=96:s=${dm.W}x${dm.H}:fps=24,setsar=1[v1];[v0][v1]xfade=transition=fade:duration=0.4:offset=1.8,vignette=PI/5,noise=alls=7:allf=t,format=yuv420p[v]`, '-map', '[v]', '-t', '3.6', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26', '-movflags', '+faststart', out], { timeout: 90000 });
+    return await fs.readFile(out);
+  } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}
 async function scrollClip(given, i, dm = { W, H }) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-s-'));
   try {
@@ -281,13 +291,27 @@ async function charClip(job, i) {
   await stage(job, `Clip ${i + 1} of ${job.scenes.length}: drawing scene`);
   const url = await generateWithReference({ image: ref.data, prompt: `The same character with the same face, hair and clothes. ${String(job.scenes[i].prompt).slice(0, 380)}. ${style}, ${man ? 'comic panel composition, no text, no speech bubbles, ' : ''}dark moody lighting, ${job.landscape && !man ? 'wide cinematic 16:9 frame' : 'tall frame'}.` });
   const img = await get(url);
-  return man ? scrollClip(img, i, DIMS(job)) : stillClip(job.scenes[i].prompt, i, img, DIMS(job), true);
+  if (man) return scrollClip(img, i, DIMS(job));
+  // The chain: a second keyframe -> ToonCrafter real in-between motion -> keyframe morph -> slow zoom. Never blocks.
+  let imgB = null;
+  try { imgB = await get(await generateWithReference({ image: img, prompt: `The same character in the exact same scene a few seconds later, body shifted mid-motion, hair and clothes reacting to movement, same composition, same lighting, same style.` })); } catch (e) { console.error('keyframe2', String(e.message).slice(0, 80)); }
+  if (imgB && Date.now() > toonDownAt) {
+    try {
+      const vu = await generateInbetweens({ imageA: img, imageB: imgB, prompt: String(job.scenes[i].prompt).slice(0, 300) });
+      const r = await fetch(vu, { signal: AbortSignal.timeout(120000) }); const vb = r.ok ? Buffer.from(await r.arrayBuffer()) : null;
+      if (vb && vb.length > 50000) { job.note = 'AI animated frames, one fixed character (FLUX Kontext + ToonCrafter motion)'; return vb; }
+      throw new Error('The animation service returned an empty clip.');
+    } catch (e) { console.error('toon', String(e.message).slice(0, 100)); toonDownAt = Date.now() + 1800000; }
+  }
+  if (imgB) { try { job.note = 'AI animated frames, one fixed character (FLUX Kontext), keyframe morph motion'; return await morphClip(img, imgB, i, DIMS(job)); } catch (e) { console.error('morph', String(e.message).slice(0, 80)); } }
+  return stillClip(job.scenes[i].prompt, i, img, DIMS(job), true);
 }
 const NOTE = { agnes: 'Free AI-video GPU was used up today, so this one uses Agnes AI video', stock: 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)', still: 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion' };
 let agnesOffUntil = 0;
 const fallbackMode = () => process.env.AGNES_API_KEY && Date.now() > agnesOffUntil ? 'agnes' : process.env.PIXABAY_KEY ? 'stock' : 'still';
 let agnesAt = 0;
 let gpuDownAt = 0; // last time the free GPU quota failed; skip the slow AI attempt for 30 min after
+let toonDownAt = 0; // last time ToonCrafter (ZeroGPU) failed; use the morph path for 30 min after
 const withTimeout = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} took too long`)), ms))]);
 const stage = async (job, t) => { job.stage = t; await job.save().catch(() => {}); };
 async function makeScene(job, i) {
