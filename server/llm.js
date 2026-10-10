@@ -1,6 +1,6 @@
 const URL_ = 'https://api.groq.com/openai/v1/chat/completions';
 export const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
-export const CHAIN = [MODEL, 'openai/gpt-oss-20b', 'meta-llama/llama-4-scout-17b-16e-instruct'];
+export const CHAIN = [MODEL, 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
 // Groq's free tier allows ~8000 tokens per request (input + max output). Keep every request under budget.
 const OUT_TOKENS = 2400;
 const IN_BUDGET = Number(process.env.LLM_INPUT_BUDGET || 5600);
@@ -65,7 +65,7 @@ export async function chatCompletion({ messages, tools }) {
 }
 
 // Photo and video understanding through Groq's free vision models (images only, small request).
-const VISION = [process.env.GROQ_VISION_MODEL, 'qwen/qwen3.8-27b', 'meta-llama/llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct'].filter(Boolean);
+const VISION = [process.env.GROQ_VISION_MODEL, 'qwen/qwen3.8-27b', 'qwen/qwen3.8-27b', 'meta-llama/llama-4-maverick-17b-128e-instruct'].filter(Boolean);
 export async function visionDescribe(images, ask, { frames = false } = {}) {
   const key = process.env.GROQ_API_KEY; if (!key) throw new Error('The AI model is not configured on this server.');
   const imgs = (images || []).filter(u => /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(u)).slice(0, 4); if (!imgs.length) throw new Error('No readable picture was sent.');
