@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 import { chatCompletion } from './llm.js';
-import { generateClip, generateSpeech, generateAgnesClip, generateImage, generateWithReference, generateInbetweens, transcribeSong } from './media.js';
+import { generateClip, generateSpeech, generateAgnesClip, generateImage, generateImageCF, generateWithReference, generateInbetweens, transcribeSong } from './media.js';
 const { Schema, model } = mongoose; const run = promisify(execFile);
 
 // Banned visual subjects: never query them and never ship them, whatever the niche.
@@ -207,6 +207,7 @@ async function stillClip(prompt, i, given, dm = { W, H }, moody = false) {
     const q = encodeURIComponent(`${String(prompt).slice(0, 350)}, cinematic photo, vivid light`);
     const pw = dm.W >= dm.H ? 1024 : 576, ph = dm.W >= dm.H ? 576 : 1024;
     let buf = given || null, err = '';
+    if (!buf && process.env.CF_TOKEN) { for (let a = 0; a < 2 && !buf; a++) { try { buf = await generateImageCF({ prompt: `${String(prompt).slice(0, 350)}, cinematic photo, vivid light` }); } catch (e) { err = 'cf: ' + String(e.message).slice(0, 60); await new Promise(r => setTimeout(r, 3000)); } } }
     for (let a = 0; a < 3 && !buf; a++) {
       try { const r = await fetch(`https://image.pollinations.ai/prompt/${q}?width=${pw}&height=${ph}&nologo=true&seed=${Date.now() % 100000 + i}`, { signal: AbortSignal.timeout(60000) }); const b = Buffer.from(await r.arrayBuffer()); if (r.ok && /image/.test(r.headers.get('content-type') || '') && b.length > 5000) buf = b; else err = `HTTP ${r.status}`; } catch (e) { err = e.message; }
       if (!buf) await new Promise(r => setTimeout(r, 4000));
