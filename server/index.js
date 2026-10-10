@@ -368,8 +368,8 @@ app.get('/api/health/pipeline', wrap(async (q, r) => {
   const wantN = Math.max(0, Math.min(160, Math.round(Number(q.query.scenes) || 0))); const wantLand = q.query.land === '1'; const sig = { userId: SELFTEST, topic: want, long: wantLong, char: wantChar, landscape: wantLand };
   let job = await VideoJob.findOne(sig).sort('-createdAt');
   if (!job || (Number(q.query.fresh) > 0 && new Date(job.createdAt).getTime() < Number(q.query.fresh)) || (job.status === 'done' && !/vertical|landscape/.test(job.note || '')) || (Date.now() - new Date(job.createdAt) > 3600000 && ['done', 'failed'].includes(job.status)) || (job.status === 'failed' && Date.now() - new Date(job.createdAt) > 300000) || (wantN && job.scenesWanted !== wantN) || (!['done', 'failed'].includes(job.status) && Date.now() - new Date(job.createdAt) > (custom ? 6 * 3600000 : wantLong ? 2400000 : 480000))) { await VideoJob.deleteMany(sig); job = await startJob(SELFTEST, want, wantLong, wantChar, wantN, true, wantLand); }
-  const openJobs = await VideoJob.find({ status: { $nin: ['done', 'failed'] } }).sort('createdAt').select('status stage createdAt lockUntil userId').lean();
-  r.json({ ...publicJob(job), final: job.status === 'done' ? (await VideoBlob.findOne({ jobId: job._id, kind: 'final' }).select('_id').lean()) ? 'stored' : 'missing' : null, queue: { open: openJobs.length, oldest: openJobs[0] ? { id: String(openJobs[0]._id), status: openJobs[0].status, stage: openJobs[0].stage, ageMin: Math.round((Date.now() - new Date(openJobs[0].createdAt)) / 60000), locked: !!(openJobs[0].lockUntil && new Date(openJobs[0].lockUntil) > new Date()), selftest: String(openJobs[0].userId) === String(SELFTEST) } : null } });
+  const openJobs = await VideoJob.find({ status: { $nin: ['done', 'failed'] } }).sort('createdAt').select('status stage createdAt lockUntil userId topic title scenes.state').lean();
+  r.json({ ...publicJob(job), final: job.status === 'done' ? (await VideoBlob.findOne({ jobId: job._id, kind: 'final' }).select('_id').lean()) ? 'stored' : 'missing' : null, queue: { open: openJobs.length, jobs: openJobs.slice(0, 6).map(j => ({ id: String(j._id), status: j.status, stage: j.stage, topic: (j.topic || '').slice(0, 60), title: j.title || '', ok: (j.scenes || []).filter(x => x.state === 'ok').length, ageMin: Math.round((Date.now() - new Date(j.createdAt)) / 60000) })) } });
 }));
 app.get('/api/health/agnes', wrap(async (q, r) => {
   const key = process.env.AGNES_API_KEY; if (!key) return r.json({ configured: false });
@@ -377,6 +377,14 @@ app.get('/api/health/agnes', wrap(async (q, r) => {
   try { const m = await fetch('https://apihub.agnes-ai.com/v1/models', { headers: H, signal: AbortSignal.timeout(15000) }); const t = await m.text(); out.models = { status: m.status, body: t.replace(/\s+/g, ' ').slice(0, 600) }; } catch (e) { out.models = { error: e.message.slice(0, 100) }; }
   try { const c = await fetch('https://apihub.agnes-ai.com/v1/videos', { method: 'POST', headers: H, body: JSON.stringify({ model: 'agnes-video-v2.0', prompt: 'a red balloon floating up in a blue sky', width: 576, height: 1024, num_frames: 97, frame_rate: 24 }), signal: AbortSignal.timeout(20000) }); const t = await c.text(); out.create = { status: c.status, body: t.replace(/\s+/g, ' ').replace(key, '***').slice(0, 500) }; } catch (e) { out.create = { error: e.message.slice(0, 100) }; }
   r.json(out);
+}));
+app.get('/api/health/pipeline/clips', wrap(async (q, r) => {
+  const job = q.query.job ? await VideoJob.findById(String(q.query.job)) : await VideoJob.findOne({ userId: SELFTEST }).sort('-createdAt');
+  if (!job) throw bad('No job.', 404);
+  const i = Math.max(0, Number(q.query.idx) || 0);
+  const b = await VideoBlob.findOne({ jobId: job._id, kind: 'clip', idx: i });
+  if (!b) throw bad('No clip at that index.', 404);
+  r.set({ 'content-type': 'video/mp4', 'content-length': b.data.length }).send(b.data);
 }));
 app.get('/api/health/pipeline/script', wrap(async (q, r) => { const job = await VideoJob.findOne({ userId: SELFTEST }).sort('-createdAt'); r.json(job ? { topic: job.topic, title: job.title, long: job.long, status: job.status, stage: job.stage, scenes: job.scenes.map(x => ({ act: x.act, kw: x.kw, state: x.state, say: x.say })) } : {}); }));
 app.get('/api/health/pipeline/file', wrap(async (q, r) => { const job = await VideoJob.findOne({ userId: SELFTEST, status: 'done' }).sort('-createdAt'); const bs = job && await VideoBlob.find({ jobId: job._id, kind: 'final' }).sort('idx'); if (!bs || !bs.length) throw bad('No self-test video yet.', 404); const data = bs.length > 1 ? Buffer.concat(bs.map(b => b.data)) : bs[0].data; r.set({ 'content-type': 'video/mp4', 'content-length': data.length }).send(data); }));
