@@ -37,7 +37,7 @@ export const VideoJob = model('VideoJob', new Schema({
   scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, manhwa: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, landscape: { type: Boolean, default: false }, startedAt: Date,
   lockUntil: { type: Date, default: null }, bytes: { type: Number, default: 0 },
 }, { timestamps: true }));
-export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer }, { timestamps: true }));
+export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer, gen: { type: Boolean, default: false } }, { timestamps: true }));
 
 export const MAX_ACTIVE = 1, MAX_PER_DAY = 4, SCENES = 4, LONG_SCENES = 14;
 export async function startJob(userId, topic, long = false, char = false, scenesWanted = 0, sys = false, landscape = false, manhwa = false) {
@@ -318,7 +318,7 @@ async function makeScene(job, i) {
   }
   if (!useChar && job.mode === 'stock') { await stage(job, `${tag}: finding footage`); data = await stockClip(job, i); job.note = NOTE.stock; }
   if (!useChar && job.mode === 'still') data = await stillClip(job.scenes[i].prompt, i, null, DIMS(job));
-  await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'clip', idx: i, data });
+  await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'clip', idx: i, data, gen: useChar });
   if (job.scenes[i].say && !job.lyric) {
     await stage(job, `${tag}: voiceover`);
     try { const au = await generateSpeech({ text: job.scenes[i].say, hindi: /[\u0900-\u097F]/.test(job.scenes[i].say) }); const ar = await fetch(au, { signal: AbortSignal.timeout(30000) }); if (ar.ok) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'audio', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'audio', idx: i, data: Buffer.from(await ar.arrayBuffer()) }); } } catch (e) { console.error('voice', e.message.slice(0, 120)); }
@@ -329,6 +329,7 @@ async function step(job) {
   if (job.lyric && (job.status === 'queued' || job.status === 'scripting')) { job.status = 'scripting'; await job.save(); return lyricScript(job); }
   if (job.status === 'queued' || job.status === 'scripting') { job.status = 'scripting'; job.stage = job.long ? 'Planning the story' : 'Writing the script'; await job.save(); return script(job); }
   if (job.status === 'clips') {
+    if (!job.lyric) { const legacy = await VideoBlob.findOne({ jobId: job._id, kind: 'clip', gen: { $ne: true } }).select('_id').lean(); if (legacy) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip' }); job.scenes.forEach(s => { s.state = 'wait'; s.tries = 0; }); job.note = 'Re-making every scene as AI-generated animation (no stock footage)'; await job.save(); } }
     const i = job.scenes.findIndex(s => s.state === 'wait');
     if (i < 0) { const ok = job.scenes.filter(s => s.state === 'ok').length; if (ok < 2) throw new Error('Not enough clips could be made. Please try again.'); job.status = 'stitching'; job.stage = 'Joining clips with the voice'; return job.save(); }
     try { await withTimeout(makeScene(job, i), 170000, `Clip ${i + 1}`); }
