@@ -299,7 +299,7 @@ async function charClip(job, i) {
       img = await get(url);
     } catch (e) { console.error('sceneimg', String(e.message).slice(0, 100)); }
   }
-  if (!img) { job.note = 'Free GPU busy - backup picture chain used for this scene (character may vary)'; return stillClip(job.scenes[i].prompt, i, null, DIMS(job), true); }
+  if (!img) { if (process.env.CHAR_FALLBACK === '0') throw new Error('The free GPU for AI video and pictures is used up for today. It refills about 24 hours after the first use.'); job.note = 'Free GPU busy - backup picture chain used for this scene (character may vary)'; return stillClip(job.scenes[i].prompt, i, null, DIMS(job), true); }
   if (man) return scrollClip(img, i, DIMS(job));
   // The chain: a second keyframe -> ToonCrafter real in-between motion -> keyframe morph -> slow zoom. Never blocks.
   let imgB = null;
