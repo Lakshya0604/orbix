@@ -35,11 +35,11 @@ export function Answer({ text, onError, shared }) {
     {media.map(u => <Media key={u} url={u} onError={onError} shared={shared} />)}
   </>);
 }
-export function Steps({ steps, live }) {
+export function Steps({ steps, live, model }) {
   const [open, setOpen] = useState(!!live);
   if (!steps?.length) {
     if (live) return null;
-    return <div className="steps"><div className="prov">🧠 Orbix AI (gpt-oss-120b) · answered directly - no tools used</div></div>;
+    return <div className="steps"><div className="prov">🧠 Orbix AI ({model || 'gpt-oss-120b'}) · answered directly - no tools used</div></div>;
   }
   const names = steps.map(s => `${s.server} · ${s.tool}`).join(', ');
   return (
