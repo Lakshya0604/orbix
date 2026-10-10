@@ -34,19 +34,21 @@ const sanitizeKw = (kw, subject, shot) => {
 export const VideoJob = model('VideoJob', new Schema({
   userId: { type: Schema.Types.ObjectId, index: true }, topic: String, title: { type: String, default: '' },
   status: { type: String, default: 'queued', index: true }, // queued, scripting, clips, stitching, done, failed
-  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, startedAt: Date,
+  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, startedAt: Date,
   lockUntil: { type: Date, default: null }, bytes: { type: Number, default: 0 },
 }, { timestamps: true }));
 export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer }, { timestamps: true }));
 
 export const MAX_ACTIVE = 1, MAX_PER_DAY = 4, SCENES = 4, LONG_SCENES = 14;
-export async function startJob(userId, topic, long = false, char = false) {
+export async function startJob(userId, topic, long = false, char = false, scenesWanted = 0, sys = false) {
   const t = String(topic || '').trim().slice(0, 200);
   if (t.length < 3) throw Object.assign(new Error('Tell me what the video is about.'), { status: 400 });
   await VideoJob.updateMany({ userId, status: { $nin: ['done', 'failed'] }, updatedAt: { $lt: new Date(Date.now() - 20 * 60000) } }, { status: 'failed', error: 'This one got stuck (the server restarted). Please start it again.' });
+  if (!sys) {
   if (await VideoJob.countDocuments({ userId, status: { $nin: ['done', 'failed'] } }) >= MAX_ACTIVE) throw Object.assign(new Error('One video is already being made. Wait for it to finish.'), { status: 429 });
   if (await VideoJob.countDocuments({ userId, createdAt: { $gt: new Date(Date.now() - 86400000) } }) >= MAX_PER_DAY) throw Object.assign(new Error(`Free limit: ${MAX_PER_DAY} videos per day.`), { status: 429 });
-  return VideoJob.create({ userId, topic: t, long: !!long, char: !!char, startedAt: new Date() });
+  }
+  return VideoJob.create({ userId, topic: t, long: !!long, char: !!char, scenesWanted: Math.min(160, Math.max(0, Math.round(scenesWanted) || 0)), startedAt: new Date() });
 }
 
 export async function startLyricJob(userId, title, buf) {
@@ -97,7 +99,7 @@ async function lyricScript(job) {
 const ARC = 'The scenes must be ONE connected story with a clear arc: a hook/intro that sets the character and place, a buildup that raises the stakes, a turn or twist, a climax, and a closing ending that pays off the start. Each scene continues directly from the previous one (same characters, same place, cause and effect), never a list of unrelated facts.';
 const jsonOf = t => { const m = String(t || '').match(/\{[\s\S]*\}/)?.[0] || ''; for (const v of [m, m.replace(/,\s*([}\]])/g, '$1'), m.replace(/[\u201c\u201d]/g, "'").replace(/,\s*([}\]])/g, '$1')]) { try { return JSON.parse(v); } catch {} } return null; };
 async function script(job) {
-  const N = job.long ? LONG_SCENES : SCENES; let outline = '';
+  const N = job.long ? (job.scenesWanted >= 14 ? Math.min(160, job.scenesWanted) : LONG_SCENES) : SCENES; let outline = '';
   if (job.char && !job.charDesc) { try { const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: 'Describe the MAIN character of this story in ONE English sentence of 25 to 35 words for an illustrator: age, build, face, hair, clothes with colors, any signature prop. Reply with only that sentence.' }, { role: 'user', content: `Topic: ${job.topic}` }] }); job.charDesc = String(m.content || '').replace(/\s+/g, ' ').slice(0, 400); } catch { job.charDesc = ''; } }
   if (job.long) {
     let o = null;
@@ -108,16 +110,21 @@ async function script(job) {
   let j = null;
   const sysFor = (n, extra) => `You write vertical YouTube Shorts style narrated stories. Reply with ONLY valid JSON (never use double quote characters inside the text values): {"title":"...","subject":"...","scenes":[{"act":"intro","shot":"...","kw":"...","say":"..."}]}. Exactly ${n} scenes. ${ARC} "act" is one of intro, buildup, twist, climax, ending. "shot" is ONE visual description in English, 20 to 40 words, concrete (subject, setting, light, camera move), no text overlays, no real people or brands. "kw" is TWO stock-footage search phrases separated by a pipe: the first for what the FIRST half of the narration says, the second for the SECOND half, each 2 or 3 plain English words naming a visible, moving real-world subject that a stock site would have (for example "storm waves crash|old wooden door"). Never abstract words, never names of people, never flags, countries, wars, weapons, religion or politics, always English even when the narration is Hindi. EVERY phrase must contain the concrete main subject of the story (the same noun each time, e.g. astronaut, moon, lighthouse, forest) plus one visible detail, e.g. "astronaut moon surface|earth from space". "subject" is the story's main visible subject in 2 or 3 plain English words (e.g. "astronaut moon"). "say" is the narration for that shot (never empty, never a repeat of another scene's sentence), spoken in the same language as the user's topic (English if unsure; Hindi in Devanagari script if the topic is Hindi or Hinglish): ${job.long ? '1 or 2 sentences of 12 to 22 words' : 'ONE sentence of 8 to 12 words'}.${extra || ''}`;
   if (job.long) {
-    const plan = [['intro', 3], ['buildup', 3], ['twist', 2], ['climax', 3], ['ending', 3]]; const acc = [];
+    const plan = N > 14 ? [['intro', Math.max(3, Math.round(N * 0.16))], ['buildup', Math.max(3, Math.round(N * 0.24))], ['twist', Math.max(2, Math.round(N * 0.14))], ['climax', Math.max(3, Math.round(N * 0.22))], ['ending', 0]] : [['intro', 3], ['buildup', 3], ['twist', 2], ['climax', 3], ['ending', 3]]; plan[4][1] = Math.max(2, N - plan.slice(0, 4).reduce((s, p) => s + p[1], 0)); const acc = [];
+    const recentSays = () => acc.slice(-12).map(x => x.say).join(' ');
     for (const [act, n] of plan) {
-      let got = null, why = '';
-      for (let t = 0; t < 8 && !got; t++) {
-        job.stage = `Writing the story: ${act}`; await job.save().catch(() => {});
-        let m; try { m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: sysFor(n, `\nStory plan:\n${outline}\nWrite ONLY the "${act}" part now: exactly ${n} scenes, all with act "${act}". "shot" and "kw" must be in English only.${acc.length ? `\nNarration so far (continue straight from it):\n${acc.map(x => x.say).join(' ')}` : ''}`) }, { role: 'user', content: `Topic: ${job.topic}` }] }); } catch (e) { why = 'llm: ' + String(e.message).slice(0, 120); await new Promise(r => setTimeout(r, 10000 * (t + 1))); continue; }
-        const x = jsonOf(m.content); const eng = sc => { const t = String(sc?.shot || ''); return t.length > 10 && t.replace(/[\x00-\x7F]/g, '').length < t.length * 0.3; }; if (x && Array.isArray(x.scenes) && x.scenes.filter(sc => String(sc?.say || '').trim() && eng(sc)).length >= 1) got = x.scenes.filter(sc => String(sc?.say || '').trim() && eng(sc)).slice(0, n); else why = 'parse: ' + String(m.content || '').replace(/\s+/g, ' ').slice(0, 160) + ' ...' + String(m.content || '').replace(/\s+/g, ' ').slice(-60);
+      let made = 0, why = '';
+      for (let batch = 0; batch < 10 && made < n; batch++) {
+        const want = Math.min(8, n - made); let got = null;
+        for (let t = 0; t < 8 && !got; t++) {
+          job.stage = `Writing the story: ${act}`; await job.save().catch(() => {});
+          let m; try { m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: sysFor(want, `\nStory plan:\n${outline}\nWrite ONLY the "${act}" part now: exactly ${want} scenes, all with act "${act}". "shot" and "kw" must be in English only.${acc.length ? `\nNarration so far (continue straight from it):\n${recentSays()}` : ''}`) }, { role: 'user', content: `Topic: ${job.topic}` }] }); } catch (e) { why = 'llm: ' + String(e.message).slice(0, 120); await new Promise(r => setTimeout(r, 10000 * (t + 1))); continue; }
+          const x = jsonOf(m.content); const eng = sc => { const t = String(sc?.shot || ''); return t.length > 10 && t.replace(/[\x00-\x7F]/g, '').length < t.length * 0.3; }; if (x && Array.isArray(x.scenes) && x.scenes.filter(sc => String(sc?.say || '').trim() && eng(sc)).length >= 1) got = x.scenes.filter(sc => String(sc?.say || '').trim() && eng(sc)).slice(0, want); else why = 'parse: ' + String(m.content || '').replace(/\s+/g, ' ').slice(0, 160) + ' ...' + String(m.content || '').replace(/\s+/g, ' ').slice(-60);
+        }
+        if (!got) break;
+        got.forEach(x => { if (x && typeof x === 'object') x.act = act; }); acc.push(...got); made += got.length;
       }
-      if (!got) throw new Error('The script came back broken. Try again. [' + why + ']');
-      got.forEach(x => { if (x && typeof x === 'object') x.act = act; }); acc.push(...got);
+      if (made < Math.min(n, 2)) throw new Error('The script came back broken. Try again. [' + why + ']');
     }
     j = { title: job.title, subject: job.subject, scenes: acc };
   } else { let why = ''; for (let tryN = 0; tryN < 6 && !j; tryN++) {
@@ -154,8 +161,8 @@ async function stitch(job) {
     const out = path.join(dir, 'out.mp4');
     await run(ffmpegPath, ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'l.txt'), '-c', 'copy', '-movflags', '+faststart', out], { timeout: 120000 });
     let data = await fs.readFile(out);
-    if (data.length > 15.5e6) throw new Error('This video is too long to save on the free plan yet. Try a shorter story.');
-    await VideoBlob.deleteMany({ jobId: job._id, kind: 'final' }); await VideoBlob.create({ jobId: job._id, kind: 'final', idx: 0, data });
+    if (data.length > (job.scenesWanted ? 150e6 : 15.5e6)) throw new Error('This video is too long to save on the free plan yet. Try a shorter story.');
+    await VideoBlob.deleteMany({ jobId: job._id, kind: 'final' }); for (let p = 0; p * 7e6 < data.length; p++) await VideoBlob.create({ jobId: job._id, kind: 'final', idx: p, data: data.subarray(p * 7e6, (p + 1) * 7e6) });
     job.bytes = data.length; job.status = 'done'; job.note = `${clips.length} clips, ${voiced ? `${voiced} with voiceover` : 'no voiceover (voice service was busy)'}, vertical 9:16${job.note ? ' · ' + job.note : ''}`; await job.save();
   } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
