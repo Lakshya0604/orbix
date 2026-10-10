@@ -43,7 +43,7 @@ export const MAX_ACTIVE = 1, MAX_PER_DAY = 4, SCENES = 4, LONG_SCENES = 14;
 export async function startJob(userId, topic, long = false, char = false, scenesWanted = 0, sys = false, landscape = false, manhwa = false) {
   const t = String(topic || '').trim().slice(0, 200);
   if (t.length < 3) throw Object.assign(new Error('Tell me what the video is about.'), { status: 400 });
-  await VideoJob.updateMany({ userId, status: { $nin: ['done', 'failed'] }, updatedAt: { $lt: new Date(Date.now() - 2 * 3600000) }, stage: { $not: /quota/i } }, { status: 'failed', error: 'This one got stuck (the server restarted). Please start it again.' });
+  await VideoJob.updateMany({ userId, status: { $nin: ['done', 'failed', 'queued'] }, updatedAt: { $lt: new Date(Date.now() - 2 * 3600000) }, stage: { $not: /quota/i } }, { status: 'failed', error: 'This one got stuck (the server restarted). Please start it again.' });
   if (!sys) {
   if (await VideoJob.countDocuments({ userId, status: { $nin: ['done', 'failed'] } }) >= MAX_ACTIVE) throw Object.assign(new Error('One video is already being made. Wait for it to finish.'), { status: 429 });
   if (await VideoJob.countDocuments({ userId, createdAt: { $gt: new Date(Date.now() - 86400000) } }) >= MAX_PER_DAY) throw Object.assign(new Error(`Free limit: ${MAX_PER_DAY} videos per day.`), { status: 429 });
