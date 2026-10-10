@@ -41,7 +41,7 @@ export default function Hub({ user, dark, setDark, logout }) {
   const [servers, setServers] = useState([]);
   const [catalog, setCatalog] = useState({ servers: [], rejected: [] });
   const [health, setHealth] = useState({});
-  const [chats, setChats] = useState([]); const [docs, setDocs] = useState([]); const [upBusy, setUpBusy] = useState(false); const [attach, setAttach] = useState(false); const [lastDoc, setLastDoc] = useState(null); const [att, setAtt] = useState(null); const picRef = useRef(null); const vidRef = useRef(null); const [mem, setMem] = useState({ memory: '', off: false }); const fileRef = useRef(null);
+  const [chats, setChats] = useState([]); const [docs, setDocs] = useState([]); const [upBusy, setUpBusy] = useState(false); const [attach, setAttach] = useState(false); const [lastDoc, setLastDoc] = useState(null); const [att, setAtt] = useState(null); const picRef = useRef(null); const taRef = useRef(null); const vidRef = useRef(null); const [mem, setMem] = useState({ memory: '', off: false }); const fileRef = useRef(null);
   const [chatId, setChatId] = useState(null);
   const [msgs, setMsgs] = useState([]);
   const [live, setLive] = useState(null); // {steps, status}
@@ -128,6 +128,7 @@ export default function Hub({ user, dark, setDark, logout }) {
     return () => { stop = true; ctrl.abort(); };
   }, []);
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [msgs, live]);
+  useEffect(() => { const t = taRef.current; if (t) { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; } }, [text]);
 
   const addCatalog = async (c, apiKey) => { try { await api('/api/servers', { method: 'POST', body: { catalogId: c.id, apiKey } }); await loadServers(); } catch (e) { say(e.message); } };
   const connectAllFree = async () => { orbi('happy', 'Connecting all the free servers…', 4000); for (const c of catalog.servers.filter(c => c.auth === 'none' && !servers.some(s => s.catalogId === c.id))) await addCatalog(c); };
@@ -218,7 +219,7 @@ export default function Hub({ user, dark, setDark, logout }) {
             {custom.open && <form className="custom" onSubmit={addCustom}>
               <input required placeholder="Name" value={custom.name} onChange={e => setCustom({ ...custom, name: e.target.value })} />
               <input required placeholder="https://server.example.com/mcp" value={custom.url} onChange={e => setCustom({ ...custom, url: e.target.value })} />
-              <input placeholder="Your own API key / token (optional, stored encrypted)" type="password" value={custom.apiKey} onChange={e => setCustom({ ...custom, apiKey: e.target.value })} />
+              <input placeholder="API key - only for 'Needs key' servers, leave empty for free (optional)" type="password" value={custom.apiKey} onChange={e => setCustom({ ...custom, apiKey: e.target.value })} />
               <button className="btn primary sm">Connect</button>
             </form>}
           </section>}
@@ -314,7 +315,7 @@ export default function Hub({ user, dark, setDark, logout }) {
                 <button type="button" role="menuitem" onClick={() => { setAttach(false); vidRef.current?.click(); }}><span>🎬</span><b>Video</b><small>ask about it, make one like it</small></button>
               </div></>}
             </div>
-            <textarea rows={1} value={text} onChange={e => setText(e.target.value)} placeholder="Ask for anything your servers can do…" onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
+            <textarea ref={taRef} rows={1} value={text} onChange={e => setText(e.target.value)} placeholder={typeof window !== 'undefined' && window.innerWidth < 560 ? 'Ask anything…' : 'Ask for anything your servers can do…'} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
             {busy ? <button type="button" className="btn ghost" onClick={() => abort.current?.abort()}>Stop</button> : <button className="btn primary" disabled={!text.trim()}>Send</button>}
           </form>
         </main>
@@ -330,4 +331,4 @@ export default function Hub({ user, dark, setDark, logout }) {
       <AnimatePresence>{toast && <motion.div className="toast" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
     </div>
   );
-            }
+    }
