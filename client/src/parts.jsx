@@ -37,10 +37,14 @@ export function Answer({ text, onError, shared }) {
 }
 export function Steps({ steps, live }) {
   const [open, setOpen] = useState(!!live);
-  if (!steps?.length) return null;
+  if (!steps?.length) {
+    if (live) return null;
+    return <div className="steps"><div className="prov">🧠 Orbix AI (gpt-oss-120b) · answered directly - no tools used</div></div>;
+  }
+  const names = steps.map(s => `${s.server} · ${s.tool}`).join(', ');
   return (
     <div className="steps">
-      <button className="steps-toggle" onClick={() => setOpen(!open)}>{open ? '▾' : '▸'} {steps.length} tool {steps.length === 1 ? 'call' : 'calls'}{live ? ' · working…' : ''}</button>
+      <button className="steps-toggle" onClick={() => setOpen(!open)}>{open ? '▾' : '▸'} {live ? 'Using' : 'Used'} {steps.length} tool{steps.length === 1 ? '' : 's'}: {names.slice(0, 140)}{names.length > 140 ? '…' : ''}{live ? ' · working…' : ''}</button>
       {open && steps.map(s => (
         <div key={s.id} className={`step ${s.status}`}>
           <div className="step-h"><span className="dot" /><b>{s.server}</b><span className="tn">{s.tool}</span>{s.ms != null && <span className="ms">{s.ms} ms</span>}<span className="st">{s.status}</span></div>
@@ -50,4 +54,3 @@ export function Steps({ steps, live }) {
     </div>
   );
 }
-
