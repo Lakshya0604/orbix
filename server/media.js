@@ -92,6 +92,46 @@ export async function generateAgnesClip({ prompt, frames = 97, fps = 24, width =
   throw new Error('Agnes took too long.');
 }
 
+// Anime in-betweening: ToonCrafter generates the motion BETWEEN two keyframes of the same character (free ZeroGPU Space, shares the daily quota).
+// This Space runs the root-path queue API (no /gradio_api prefix): /upload, /queue/join, /queue/data.
+const CSPACE = 'https://doubiiu-tooncrafter.hf.space';
+async function callQueue(space, fnIndex, data, { waitMs = 300000 } = {}) {
+  const auths = [process.env.HF_TOKEN ? { authorization: `Bearer ${process.env.HF_TOKEN}` } : {}, {}]; const errs = [];
+  for (const auth of auths) {
+    try {
+      const session = Math.random().toString(36).slice(2);
+      const j = await fetch(`${space}/queue/join`, { method: 'POST', headers: { 'content-type': 'application/json', ...auth }, body: JSON.stringify({ data, event_data: null, fn_index: fnIndex, trigger_id: 13, session_hash: session }), signal: AbortSignal.timeout(30000) });
+      if (!j.ok) { errs.push(`join HTTP ${j.status} ${(await j.text()).replace(/\s+/g, ' ').slice(0, 100)}`); continue; }
+      const res = await fetch(`${space}/queue/data?session_hash=${session}`, { headers: auth, signal: AbortSignal.timeout(waitMs) });
+      const body = await res.text(); let done = null, err = '';
+      for (const line of body.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        let ev; try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+        if ((ev.msg === 'process_completed' || ev.msg === 'process_generating') && ev.output?.data) done = ev.output.data;
+        if (ev.msg === 'process_error' || ev.msg === 'unexpected_error') err = JSON.stringify(ev).replace(/\s+/g, ' ').slice(0, 150);
+      }
+      if (done) return done;
+      errs.push(err || body.replace(/\s+/g, ' ').slice(0, 150) || 'no result');
+    } catch (e) { errs.push(String(e.message).slice(0, 100)); }
+  }
+  console.error('queue call failed', fnIndex, errs.join(' | '));
+  throw new Error(`free GPU quota used up (${errs.join(' | ')})`);
+}
+export async function generateInbetweens({ imageA, imageB, prompt }) {
+  const text = String(prompt || '').trim().slice(0, 300) || 'the scene continues, natural motion';
+  if (!imageA || !imageB) throw new Error('Two keyframes needed.');
+  const up = async (buf, name) => {
+    const auths = [process.env.HF_TOKEN ? { authorization: `Bearer ${process.env.HF_TOKEN}` } : {}, {}];
+    for (const auth of auths) { try { const fd = new FormData(); fd.append('files', new Blob([buf], { type: 'image/jpeg' }), name); const u = await fetch(`${CSPACE}/upload`, { method: 'POST', body: fd, headers: auth, signal: AbortSignal.timeout(30000) }); if (u.ok) { const p = (await u.json())?.[0]; if (p) return p; } } catch { /* try next */ } }
+    throw new Error('Could not upload the keyframes to the animation service.');
+  };
+  const pa = await up(imageA, 'a.jpg'); const pb = await up(imageB, 'b.jpg');
+  const file = p => ({ path: p, meta: { _type: 'gradio.FileData' } });
+  const out = await callQueue(CSPACE, 2, [file(pa), text, 50, 7.5, 1.0, 10, Math.floor(Math.random() * 1e9), file(pb)], { waitMs: 300000 });
+  const o = out?.[0] || {}; const url = o.video?.url || o.url || (o.path ? `${CSPACE}/file=${o.path}` : null);
+  if (!url) throw new Error('The animation service returned no clip.');
+  return url;
+}
 // Character consistency: FLUX.1 Kontext [dev] Space edits a reference picture, so the same character appears in every scene.
 const KSPACE = 'https://black-forest-labs-flux-1-kontext-dev.hf.space';
 export async function generateWithReference({ image, prompt }) {
