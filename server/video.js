@@ -204,10 +204,11 @@ async function stitchLyric(job) {
 async function stillClip(prompt, i, given, dm = { W, H }, moody = false) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-k-'));
   try {
-    const q = encodeURIComponent(`${String(prompt).slice(0, 350)}, vertical cinematic photo, vivid light`);
+    const q = encodeURIComponent(`${String(prompt).slice(0, 350)}, cinematic photo, vivid light`);
+    const pw = dm.W >= dm.H ? 1024 : 576, ph = dm.W >= dm.H ? 576 : 1024;
     let buf = given || null, err = '';
     for (let a = 0; a < 3 && !buf; a++) {
-      try { const r = await fetch(`https://image.pollinations.ai/prompt/${q}?width=576&height=1024&nologo=true&seed=${Date.now() % 100000 + i}`, { signal: AbortSignal.timeout(60000) }); const b = Buffer.from(await r.arrayBuffer()); if (r.ok && /image/.test(r.headers.get('content-type') || '') && b.length > 5000) buf = b; else err = `HTTP ${r.status}`; } catch (e) { err = e.message; }
+      try { const r = await fetch(`https://image.pollinations.ai/prompt/${q}?width=${pw}&height=${ph}&nologo=true&seed=${Date.now() % 100000 + i}`, { signal: AbortSignal.timeout(60000) }); const b = Buffer.from(await r.arrayBuffer()); if (r.ok && /image/.test(r.headers.get('content-type') || '') && b.length > 5000) buf = b; else err = `HTTP ${r.status}`; } catch (e) { err = e.message; }
       if (!buf) await new Promise(r => setTimeout(r, 4000));
     }
     if (!buf) throw new Error(`The free picture service did not answer (${String(err).slice(0, 60)}).`);
@@ -285,12 +286,20 @@ async function charClip(job, i) {
   const dw = man ? 768 : job.landscape ? 1024 : 768, dh = man ? 1792 : job.landscape ? 576 : 1024;
   if (!ref) {
     await stage(job, 'Drawing the main character');
-    const url = await generateImage({ prompt: `${job.charDesc || job.topic}, full body, standing, plain simple background, ${style}`, width: dw, height: dh });
-    ref = await VideoBlob.create({ jobId: job._id, kind: 'charref', idx: 0, data: await get(url) });
+    try {
+      const url = await generateImage({ prompt: `${job.charDesc || job.topic}, full body, standing, plain simple background, ${style}`, width: dw, height: dh });
+      ref = await VideoBlob.create({ jobId: job._id, kind: 'charref', idx: 0, data: await get(url) });
+    } catch (e) { console.error('charref', String(e.message).slice(0, 100)); }
   }
   await stage(job, `Clip ${i + 1} of ${job.scenes.length}: drawing scene`);
-  const url = await generateWithReference({ image: ref.data, prompt: `The same character with the same face, hair and clothes. ${String(job.scenes[i].prompt).slice(0, 380)}. ${style}, ${man ? 'comic panel composition, no text, no speech bubbles, ' : ''}dark moody lighting, ${job.landscape && !man ? 'wide cinematic 16:9 frame' : 'tall frame'}.` });
-  const img = await get(url);
+  let img = null;
+  if (ref) {
+    try {
+      const url = await generateWithReference({ image: ref.data, prompt: `The same character with the same face, hair and clothes. ${String(job.scenes[i].prompt).slice(0, 380)}. ${style}, ${man ? 'comic panel composition, no text, no speech bubbles, ' : ''}dark moody lighting, ${job.landscape && !man ? 'wide cinematic 16:9 frame' : 'tall frame'}.` });
+      img = await get(url);
+    } catch (e) { console.error('sceneimg', String(e.message).slice(0, 100)); }
+  }
+  if (!img) { job.note = 'Free GPU busy - backup picture chain used for this scene (character may vary)'; return stillClip(job.scenes[i].prompt, i, null, DIMS(job), true); }
   if (man) return scrollClip(img, i, DIMS(job));
   // The chain: a second keyframe -> ToonCrafter real in-between motion -> keyframe morph -> slow zoom. Never blocks.
   let imgB = null;
