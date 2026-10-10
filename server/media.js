@@ -42,6 +42,17 @@ export async function generateClip({ prompt, seconds = 2, width = 704, height = 
   return url;
 }
 
+// Cloudflare Workers AI: free FLUX.1 [schnell] (~10k neurons/day free tier, ~150+ images/day). Fast (~2-5s), no watermark. 1024x1024 output.
+export async function generateImageCF({ prompt }) {
+  const tok = process.env.CF_TOKEN, acc = process.env.CF_ACCOUNT_ID;
+  if (!tok || !acc) throw new Error('No Cloudflare credentials set.');
+  const r = await fetch(`https://api.cloudflare.com/client/v4/accounts/${acc}/ai/run/@cf/black-forest-labs/flux-1-schnell`, { method: 'POST', headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/json' }, body: JSON.stringify({ prompt: String(prompt || '').trim().slice(0, 600), steps: 4 }), signal: AbortSignal.timeout(60000) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.success === false) throw new Error(`Cloudflare AI HTTP ${r.status}: ${JSON.stringify(j.errors || j).slice(0, 120)}`);
+  const b = Buffer.from(j.result.image, 'base64'); if (b.length < 5000) throw new Error('Cloudflare AI returned an empty image.');
+  return b;
+}
+
 // Voiceover with a free fallback chain, so a busy service never blocks a video:
 //   1) Edge neural voices (hi-IN Swara / en-US Andrew) through the public HF Space - best quality, needs no key.
 //   2) Google Translate voice (keyless, no quota) - robotic but always on. Returns { data: Buffer, via }.
