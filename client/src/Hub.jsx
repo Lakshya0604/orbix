@@ -54,7 +54,7 @@ export default function Hub({ user, dark, setDark, logout }) {
   const [checking, setChecking] = useState(false);
   const [left, setLeft] = useState(user.guestLeft);
   const [shareUrl, setShareUrl] = useState('');
-  const bottom = useRef(null); const abort = useRef(null);
+  const bottom = useRef(null); const abort = useRef(null); const aiModel = useRef('gpt-oss-120b');
   const say = m => { setToast(m); setTimeout(() => setToast(''), 4000); };
 
   const prevStates = useRef({});
@@ -147,22 +147,23 @@ export default function Hub({ user, dark, setDark, logout }) {
   async function send(t) {
     const message = (t ?? text).trim(); if (!message || busy) return;
     if (user.guest && left <= 0) { say('Demo finished. Create a free account to keep going.'); return; }
-    setText(''); setBusy(true); if (user.guest) setLeft(l => l - 1); setMsgs(m => [...m, { role: 'user', content: message }]); setLive({ steps: [], status: 'Orbix AI (gpt-oss-120b) is thinking…' });
+    setText(''); setBusy(true); if (user.guest) setLeft(l => l - 1); setMsgs(m => [...m, { role: 'user', content: message }]); aiModel.current = 'gpt-oss-120b'; setLive({ steps: [], status: 'Orbix AI (gpt-oss-120b) is thinking…' });
     const ctrl = new AbortController(); abort.current = ctrl; let steps = [], answer = '', err = '';
     try {
       await stream('/api/chat', { method: 'POST', body: { chatId, message, attached: att?.summary || undefined }, signal: ctrl.signal, onEvent: ev => {
         if (ev.type === 'chat') setChatId(ev.id);
-        else if (ev.type === 'thinking') setLive(l => ({ ...l, status: 'Orbix AI (gpt-oss-120b) is thinking…' }));
+        else if (ev.type === 'model') { aiModel.current = ev.model; setLive(l => l ? { ...l, status: `Orbix AI (${ev.model}) is thinking…` } : l); }
+        else if (ev.type === 'thinking') setLive(l => ({ ...l, status: `Orbix AI (${aiModel.current}) is thinking…` }));
         else if (ev.type === 'tool_call') { steps = [...steps, { id: ev.id, server: ev.server, tool: ev.tool, status: 'running' }]; setLive({ steps, status: `Calling ${ev.server} · ${ev.tool}…` }); }
         else if (ev.type === 'approval') setApproval(ev);
-        else if (ev.type === 'tool_result') { steps = steps.map(s => s.id === ev.id ? { ...s, status: ev.status, ms: ev.ms, preview: ev.preview, media: ev.media } : s); setLive({ steps, status: 'Orbix AI (gpt-oss-120b) is thinking…' }); }
-        else if (ev.type === 'answer') answer = ev.text;
+        else if (ev.type === 'tool_result') { steps = steps.map(s => s.id === ev.id ? { ...s, status: ev.status, ms: ev.ms, preview: ev.preview, media: ev.media } : s); setLive({ steps, status: `Orbix AI (${aiModel.current}) is thinking…` }); }
+        else if (ev.type === 'answer') { answer = ev.text; if (ev.model) aiModel.current = ev.model; }
         else if (ev.type === 'error') err = ev.message;
       } });
     } catch (e) { if (e.name !== 'AbortError') err = e.message; }
     setApproval(null); orbi(err ? 'worried' : 'happy', err ? 'That did not work. Try rephrasing, or check the server dots on the left.' : (/\.(mp4|webm|png|jpe?g|webp|gif)/i.test(answer) ? 'Your file is ready. Tap Download under it!' : 'Done! Want me to suggest a follow-up?'), 7000);
     const mediaFromSteps = [...new Set(steps.flatMap(s => s.media || []))].filter(u => !answer.includes(u));
-    setMsgs(m => [...m, { role: 'assistant', content: err ? `Something went wrong: ${err}` : answer + (mediaFromSteps.length ? '\n\n' + mediaFromSteps.join('\n') : ''), steps, error: !!err }]);
+    setMsgs(m => [...m, { role: 'assistant', content: err ? `Something went wrong: ${err}` : answer + (mediaFromSteps.length ? '\n\n' + mediaFromSteps.join('\n') : ''), steps, model: aiModel.current, error: !!err }]);
     setLive(null); setBusy(false); loadChats();
   }
   const decide = async allow => { const a = approval; setApproval(null); await api('/api/approve', { method: 'POST', body: { id: a.id, allow } }); };
@@ -294,7 +295,7 @@ export default function Hub({ user, dark, setDark, logout }) {
             {msgs.map((m, i) => (
               <motion.div key={i} className={`msg ${m.role} ${m.error ? 'bad' : ''}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
                 {m.role === 'user' ? <div className="bubble">{m.content}</div> : <>
-                  <Steps steps={m.steps} /><Answer text={m.content} onError={say} />
+                  <Steps steps={m.steps} model={m.model} /><Answer text={m.content} onError={say} />
                   {!m.error && <button className="chip" onClick={() => saveText(m.content, `orbix-answer-${i}.md`)}>⬇ Save answer</button>}
                 </>}
               </motion.div>
@@ -331,4 +332,4 @@ export default function Hub({ user, dark, setDark, logout }) {
       <AnimatePresence>{toast && <motion.div className="toast" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
     </div>
   );
-}
+      }
