@@ -48,9 +48,10 @@ export async function generateClip({ prompt, seconds = 2, width = 704, height = 
 const TSPACE = 'https://innoai-edge-tts-text-to-speech.hf.space';
 export async function generateSpeech({ text, hindi = false }) {
   const t = String(text || '').trim().slice(0, 400); if (!t) throw new Error('No narration text.');
-  const voice = hindi ? 'hi-IN-SwaraNeural - hi-IN (Female)' : 'en-US-AndrewNeural - en-US (Male)';
+  const voice = hindi ? (process.env.TTS_VOICE_HI || 'hi-IN-MadhurNeural - hi-IN (Male)') : (process.env.TTS_VOICE_EN || 'en-US-AndrewNeural - en-US (Male)');
+  const rate = Number(process.env.TTS_RATE ?? -10), pitch = Number(process.env.TTS_PITCH ?? -5);
   try {
-    const out = await callSpace(TSPACE, 'tts_interface', [t, voice, 0, 0], { waitMs: 45000 });
+    const out = await callSpace(TSPACE, 'tts_interface', [t, voice, rate, pitch], { waitMs: 45000 });
     const url = out?.[0]?.url;
     if (/^https:\/\/[a-z0-9.-]+\.hf\.space\//.test(url || '')) {
       const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
