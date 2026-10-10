@@ -11,7 +11,7 @@ export default function Share({ id, dark, setDark }) {
       <main className="thread">
         {err && <div className="hero"><h1>Link not available</h1><p>{err}</p></div>}
         {d && <><h2 className="share-title">{d.title}</h2><p className="hint">A conversation shared from Orbix, read only.</p>
-          {d.messages.map((m, i) => <div key={i} className={`msg ${m.role}`}>{m.role === 'user' ? <div className="bubble">{m.content}</div> : <><Steps steps={m.steps} /><Answer text={m.content} onError={() => {}} shared /></>}</div>)}</>}
+          {d.messages.map((m, i) => <div key={i} className={`msg ${m.role}`}>{m.role === 'user' ? <div className="bubble">{m.content}</div> : <><Steps steps={m.steps} model={m.model} /><Answer text={m.content} onError={() => {}} shared /></>}</div>)}</>}
       </main>
     </div>
   );
