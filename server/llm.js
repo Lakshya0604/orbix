@@ -1,5 +1,6 @@
 const URL_ = 'https://api.groq.com/openai/v1/chat/completions';
 export const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+export const CHAIN = [MODEL, 'openai/gpt-oss-20b', 'meta-llama/llama-4-scout-17b-16e-instruct'];
 // Groq's free tier allows ~8000 tokens per request (input + max output). Keep every request under budget.
 const OUT_TOKENS = 2400;
 const IN_BUDGET = Number(process.env.LLM_INPUT_BUDGET || 5600);
@@ -46,7 +47,6 @@ export async function chatCompletion({ messages, tools }) {
   const key = process.env.GROQ_API_KEY;
   if (!key) throw new Error('The AI model is not configured on this server.');
   let budget = IN_BUDGET;
-  export const CHAIN = [MODEL, 'openai/gpt-oss-20b', 'meta-llama/llama-4-scout-17b-16e-instruct'];
   const MODELS = CHAIN; let lastErr = '';
   for (let attempt = 0; attempt < 6; attempt++) {
     const f = fit(messages, tools, budget);
