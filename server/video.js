@@ -34,7 +34,7 @@ const sanitizeKw = (kw, subject, shot) => {
 export const VideoJob = model('VideoJob', new Schema({
   userId: { type: Schema.Types.ObjectId, index: true }, topic: String, title: { type: String, default: '' },
   status: { type: String, default: 'queued', index: true }, // queued, scripting, clips, stitching, done, failed
-  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, stage: { type: String, default: '' }, startedAt: Date,
+  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, startedAt: Date,
   lockUntil: { type: Date, default: null }, bytes: { type: Number, default: 0 },
 }, { timestamps: true }));
 export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer }, { timestamps: true }));
@@ -210,7 +210,7 @@ async function stockClip(job, i) {
   const subj = String(job.subject || '').split(/\s+/).filter(w => w && !BANNED.test(w)).slice(0, 3).join(' ');
   const parts = String(sc.kw || sc.prompt).split('|').map(x => x.split(/\s+/).filter(w => w && !BANNED.test(w)).join(' ').trim()).filter(Boolean).map(x => subj && !x.toLowerCase().includes(subj.toLowerCase().split(' ')[0]) ? `${subj.split(' ')[0]} ${x}` : x);
   const K = job.lyric ? Math.min(2, Math.max(1, Math.ceil(((sc.t1 || 0) - (sc.t0 || 0) + 0.5) / 4.5))) : job.long ? 2 : 1; const queries = []; for (let k = 0; k < K; k++) queries.push(parts[k] || parts[0] || String(sc.prompt));
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-s-')); const used = new Set(); const files = [];
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-s-')); const used = new Set((job.usedStock || []).map(Number)); const files = [];
   const search = async q => { const r = await fetch(`https://pixabay.com/api/videos/?key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}&per_page=20&safesearch=true${ANIM.test(job.topic) ? '&video_type=animation' : ''}`, { signal: AbortSignal.timeout(20000) }); if (!r.ok) throw new Error(`Stock service said HTTP ${r.status}.`); return ((await r.json()).hits || []).filter(h => (h.duration || 0) >= 4 && h.videos?.medium?.url); };
   const encode = async (src, out, flip) => run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', src, '-t', '4.5', '-an', '-threads', '1', '-vf', `${flip ? 'hflip,scale=' + Math.round(W * 1.3) + ':' + Math.round(H * 1.3) + ',crop=' + W + ':' + H + ',' : ''}scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=24,format=yuv420p`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-movflags', '+faststart', out], { timeout: 90000 });
   try {
@@ -235,7 +235,7 @@ async function stockClip(job, i) {
     const list = path.join(dir, 'l.txt'); await fs.writeFile(list, files.map(f => `file '${f}'`).join('\n')); const outF = path.join(dir, 'final.mp4');
     await run(ffmpegPath, ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', outF], { timeout: 60000 });
     return await fs.readFile(outF);
-  } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+  } finally { job.usedStock = [...used].slice(-600); await job.save().catch(() => {}); fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
 async function charClip(job, i) {
   let ref = await VideoBlob.findOne({ jobId: job._id, kind: 'charref' });
