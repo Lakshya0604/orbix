@@ -323,7 +323,7 @@ app.get('/api/health/llm', healthLimiter, wrap(async (q, r) => {
     const resp = await fetch('https://api.groq.com/openai/v1/models', { headers: { authorization: `Bearer ${process.env.GROQ_API_KEY}` }, signal: AbortSignal.timeout(20000) });
     const j = await resp.json().catch(() => ({}));
     const ids = (j.data || []).map(m => m.id);
-    v = { ok: resp.ok, chain: CHAIN.map(m => ({ model: m, live: ids.includes(m) })), total: ids.length };
+    v = { ok: resp.ok, chain: CHAIN.map(m => ({ model: m, live: ids.includes(m) })), total: ids.length, ids };
   } catch (e) { v = { ok: false, error: String(e.message).slice(0, 200) }; }
   llmHealth = { at: Date.now(), v };
   r.json(v);
