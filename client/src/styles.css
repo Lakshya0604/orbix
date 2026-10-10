@@ -68,7 +68,7 @@ input:focus,textarea:focus{border-color:var(--v);box-shadow:0 0 0 4px rgba(109,5
 .msg.user{align-self:flex-end;max-width:85%}.bubble{background:linear-gradient(135deg,var(--v),var(--v2));color:#fff;padding:11px 16px;border-radius:18px 18px 4px 18px;white-space:pre-wrap}
 .msg.assistant{display:flex;flex-direction:column;gap:10px;align-items:flex-start;max-width:100%}.answer{word-break:break-word;max-width:100%;min-width:0}
 .msg.bad .answer{color:var(--err)}
-.steps{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:8px 12px}.steps-toggle{background:none;border:0;font-weight:700;font-size:13px;color:var(--mute);padding:2px 0}
+.steps{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:8px 12px}.prov{font-size:12.5px;color:var(--mute);font-weight:600}.steps-toggle{background:none;border:0;font-weight:700;font-size:13px;color:var(--mute);padding:2px 0}
 .step{margin-top:8px;font-size:13px}.step-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.step .dot{width:8px;height:8px;border-radius:50%;background:var(--o);animation:ring 1s infinite}
 .step.done .dot{background:var(--ok);animation:none}.step.error .dot,.step.denied .dot{background:var(--err);animation:none}
 .tn{font-family:ui-monospace,monospace;color:var(--v);font-size:12px}.ms,.st{color:var(--mute);font-size:12px}
