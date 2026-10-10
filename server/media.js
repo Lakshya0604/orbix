@@ -42,15 +42,37 @@ export async function generateClip({ prompt, seconds = 2, width = 704, height = 
   return url;
 }
 
-// Voiceover: Edge neural voices through a public free Space (no GPU quota needed).
+// Voiceover with a free fallback chain, so a busy service never blocks a video:
+//   1) Edge neural voices (hi-IN Swara / en-US Andrew) through the public HF Space - best quality, needs no key.
+//   2) Google Translate voice (keyless, no quota) - robotic but always on. Returns { data: Buffer, via }.
 const TSPACE = 'https://innoai-edge-tts-text-to-speech.hf.space';
 export async function generateSpeech({ text, hindi = false }) {
   const t = String(text || '').trim().slice(0, 400); if (!t) throw new Error('No narration text.');
   const voice = hindi ? 'hi-IN-SwaraNeural - hi-IN (Female)' : 'en-US-AndrewNeural - en-US (Male)';
-  const out = await callSpace(TSPACE, 'tts_interface', [t, voice, 0, 0], { waitMs: 45000 });
-  const url = out?.[0]?.url;
-  if (!/^https:\/\/[a-z0-9.-]+\.hf\.space\//.test(url || '')) throw new Error('The voice service returned no audio.');
-  return url;
+  try {
+    const out = await callSpace(TSPACE, 'tts_interface', [t, voice, 0, 0], { waitMs: 45000 });
+    const url = out?.[0]?.url;
+    if (/^https:\/\/[a-z0-9.-]+\.hf\.space\//.test(url || '')) {
+      const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
+      if (r.ok) { const data = Buffer.from(await r.arrayBuffer()); if (data.length > 200) return { data, via: 'edge-neural' }; }
+    }
+    throw new Error('The neural voice service returned no audio.');
+  } catch (e) { console.error('voice neural:', String(e.message).slice(0, 100)); }
+  // Keyless fallback: Google Translate voice. ~180 chars per request, split on sentence ends; mp3 parts concatenate.
+  const lang = hindi ? 'hi' : 'en'; const parts = []; let cur = '';
+  for (const piece of t.split(/(?<=[.!?\u0964\u0965])\s+|(?<=,\s)/)) {
+    if (cur && (cur + ' ' + piece).length > 170) { parts.push(cur); cur = piece; } else cur = cur ? cur + ' ' + piece : piece;
+  }
+  if (cur) parts.push(cur);
+  const bufs = [];
+  for (const p of parts) for (let k = 0; k < p.length; k += 170) {
+    const u = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${lang}&q=${encodeURIComponent(p.slice(k, k + 170))}`;
+    const r = await fetch(u, { headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }, signal: AbortSignal.timeout(20000) });
+    if (!r.ok) throw new Error(`The fallback voice service said HTTP ${r.status}.`);
+    const b = Buffer.from(await r.arrayBuffer()); if (b.length < 200) throw new Error('The fallback voice service returned no audio.');
+    bufs.push(b);
+  }
+  return { data: Buffer.concat(bufs), via: 'google-voice' };
 }
 
 // Agnes AI video API (free "$0 / second" tier, 1 request per minute for free keys). Async: create a task, poll until completed.
