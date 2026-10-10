@@ -147,15 +147,15 @@ export default function Hub({ user, dark, setDark, logout }) {
   async function send(t) {
     const message = (t ?? text).trim(); if (!message || busy) return;
     if (user.guest && left <= 0) { say('Demo finished. Create a free account to keep going.'); return; }
-    setText(''); setBusy(true); if (user.guest) setLeft(l => l - 1); setMsgs(m => [...m, { role: 'user', content: message }]); setLive({ steps: [], status: 'Thinking…' });
+    setText(''); setBusy(true); if (user.guest) setLeft(l => l - 1); setMsgs(m => [...m, { role: 'user', content: message }]); setLive({ steps: [], status: 'Orbix AI (gpt-oss-120b) is thinking…' });
     const ctrl = new AbortController(); abort.current = ctrl; let steps = [], answer = '', err = '';
     try {
       await stream('/api/chat', { method: 'POST', body: { chatId, message, attached: att?.summary || undefined }, signal: ctrl.signal, onEvent: ev => {
         if (ev.type === 'chat') setChatId(ev.id);
-        else if (ev.type === 'thinking') setLive(l => ({ ...l, status: 'Thinking…' }));
-        else if (ev.type === 'tool_call') { steps = [...steps, { id: ev.id, server: ev.server, tool: ev.tool, status: 'running' }]; setLive({ steps, status: `Using ${ev.server}…` }); }
+        else if (ev.type === 'thinking') setLive(l => ({ ...l, status: 'Orbix AI (gpt-oss-120b) is thinking…' }));
+        else if (ev.type === 'tool_call') { steps = [...steps, { id: ev.id, server: ev.server, tool: ev.tool, status: 'running' }]; setLive({ steps, status: `Calling ${ev.server} · ${ev.tool}…` }); }
         else if (ev.type === 'approval') setApproval(ev);
-        else if (ev.type === 'tool_result') { steps = steps.map(s => s.id === ev.id ? { ...s, status: ev.status, ms: ev.ms, preview: ev.preview, media: ev.media } : s); setLive({ steps, status: 'Thinking…' }); }
+        else if (ev.type === 'tool_result') { steps = steps.map(s => s.id === ev.id ? { ...s, status: ev.status, ms: ev.ms, preview: ev.preview, media: ev.media } : s); setLive({ steps, status: 'Orbix AI (gpt-oss-120b) is thinking…' }); }
         else if (ev.type === 'answer') answer = ev.text;
         else if (ev.type === 'error') err = ev.message;
       } });
@@ -331,4 +331,4 @@ export default function Hub({ user, dark, setDark, logout }) {
       <AnimatePresence>{toast && <motion.div className="toast" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
     </div>
   );
-    }
+}
