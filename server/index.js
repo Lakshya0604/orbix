@@ -364,6 +364,7 @@ app.delete('/api/videos/:id', auth, wrap(async (q, r) => { const job = await Vid
 const SELFTEST = new mongoose.Types.ObjectId('000000000000000000000001');
 app.get('/api/health/pipeline', wrap(async (q, r) => {
   if (!imageEnabled()) return r.json({ configured: false });
+  if (q.query.cancel) { const cj = await VideoJob.findById(String(q.query.cancel)); if (cj && !['done', 'failed'].includes(cj.status)) { cj.status = 'failed'; cj.error = 'Cancelled: superseded by the new AI-animation pipeline.'; await cj.save(); } return r.json({ cancelled: !!cj }); }
   const wantLong = q.query.long === '1'; const wantChar = q.query.char === '1'; const custom = typeof q.query.topic === 'string' && q.query.topic.trim() ? q.query.topic.trim().slice(0, 160) : ''; const want = custom || (wantLong && q.query.lang === 'hi' ? 'एक अकेला चौकीदार जिसे बंद मीनार के दरवाज़े के अंदर से दस्तक सुनाई देती है' : wantLong ? 'a lonely lighthouse keeper who hears knocking from inside the locked tower door' : q.query.lang === 'hi' ? 'चाँद पर इंसान के पहले कदम की कहानी' : 'a lighthouse on a stormy coast at night');
   const wantN = Math.max(0, Math.min(160, Math.round(Number(q.query.scenes) || 0))); const wantLand = q.query.land === '1'; const wantManhwa = q.query.manhwa === '1'; const sig = { userId: SELFTEST, topic: want, long: wantLong, char: wantChar, landscape: wantLand, manhwa: wantManhwa };
   let job = await VideoJob.findOne(sig).sort('-createdAt');
