@@ -69,6 +69,9 @@ export default function Hub({ user, dark, setDark, logout }) {
   const [vids, setVids] = useState({ enabled: false, jobs: [] }); const [vTopic, setVTopic] = useState(''); const [vErr, setVErr] = useState(''); const [vPlay, setVPlay] = useState(null);
   const loadVids = useCallback(async () => { try { setVids(await api('/api/videos')); } catch {} }, []);
   const [vLong, setVLong] = useState(false);
+  const songRef = useRef(null); const [vSongFile, setVSongFile] = useState(null); const [vSong, setVSong] = useState('');
+  const pickSong = e => { const f = e.target.files?.[0]; e.target.value = ''; if (!f) return; if (f.size > 15 * 1024 * 1024) { setVErr('Song file is over 15 MB. Try a shorter or smaller one.'); return; } setVErr(''); setVSongFile(f); };
+  const makeLyric = async () => { if (!vSongFile) return; setVErr(''); try { const r = await fetch('/api/videos/lyric', { method: 'POST', headers: { 'content-type': 'application/octet-stream', authorization: 'Bearer ' + token(), 'x-title': encodeURIComponent((vSong || vSongFile.name.replace(/\.[^.]+$/, '')).slice(0, 120)) }, body: vSongFile }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Could not start the lyric video.'); setVSong(''); setVSongFile(null); loadVids(); } catch (x) { setVErr(x.message); } };
   const [vChar, setVChar] = useState(false);
   const activeVid = vids.jobs.some(j => !['done', 'failed'].includes(j.status));
   useEffect(() => { loadVids(); }, [loadVids]);
@@ -225,6 +228,9 @@ export default function Hub({ user, dark, setDark, logout }) {
             {vErr && <div className="msg err" role="alert">{vErr}</div>}
             <label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vLong} onChange={e => setVLong(e.target.checked)} disabled={!vids.enabled} /> Long story mode (about 2 minutes, a full story from start to end). Takes about 8 to 10 minutes to make.</label><label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vLong} onChange={e => setVLong(e.target.checked)} disabled={!vids.enabled} /> Long story mode (about 2 minutes, a full story from start to end). Takes about 8 to 10 minutes to make.</label>
             <label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vChar} onChange={e => setVChar(e.target.checked)} disabled={!vids.enabled} /> Same animated character in every scene (AI pictures, uses the free daily GPU time, so about one short video a day)</label>
+            <p className="hint" style={{ margin: '10px 0 4px' }}><b>Lyric video:</b> pick a song, Orbix writes the words on screen in sync and adds matching footage.</p>
+            <div className="vid-form"><input value={vSong} onChange={e => setVSong(e.target.value)} placeholder="Song title (optional)" maxLength={120} disabled={!vids.enabled} /><button type="button" className="btn ghost sm" onClick={() => songRef.current?.click()} disabled={!vids.enabled || activeVid}>{vSongFile ? vSongFile.name.slice(0, 24) : 'Choose song'}</button><button type="button" className="btn primary sm" onClick={makeLyric} disabled={!vids.enabled || !vSongFile || activeVid}>Make lyric video</button></div>
+            <input ref={songRef} type="file" hidden accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac,.aac" onChange={pickSong} />
             {vids.jobs.map(j => <div key={j.id} className="vid-card">
               <div className="vid-top"><b>{j.title || j.topic}</b><span className={`vid-st st-${j.status}`}>{{ queued: 'Waiting', scripting: 'Writing script', clips: `Clips ${j.scenes.filter(x => x === 'ok').length}/${j.scenes.length || '?'}`, stitching: 'Stitching', done: 'Ready', failed: 'Failed' }[j.status]}</span></div>
               {!['done', 'failed'].includes(j.status) && <><div className="vid-bar"><i style={{ width: `${Math.max(3, j.pct || 0)}%` }} /></div><p className="hint">{j.stage || 'Working'} · {j.pct || 0}%{j.etaSec ? ` · about ${Math.max(1, Math.round(j.etaSec / 60))} min left` : ''}</p></>}
@@ -324,4 +330,4 @@ export default function Hub({ user, dark, setDark, logout }) {
       <AnimatePresence>{toast && <motion.div className="toast" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
     </div>
   );
-}
+            }
