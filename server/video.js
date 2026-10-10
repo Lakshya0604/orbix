@@ -34,13 +34,13 @@ const sanitizeKw = (kw, subject, shot) => {
 export const VideoJob = model('VideoJob', new Schema({
   userId: { type: Schema.Types.ObjectId, index: true }, topic: String, title: { type: String, default: '' },
   status: { type: String, default: 'queued', index: true }, // queued, scripting, clips, stitching, done, failed
-  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, landscape: { type: Boolean, default: false }, startedAt: Date,
+  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, manhwa: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, landscape: { type: Boolean, default: false }, startedAt: Date,
   lockUntil: { type: Date, default: null }, bytes: { type: Number, default: 0 },
 }, { timestamps: true }));
 export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer }, { timestamps: true }));
 
 export const MAX_ACTIVE = 1, MAX_PER_DAY = 4, SCENES = 4, LONG_SCENES = 14;
-export async function startJob(userId, topic, long = false, char = false, scenesWanted = 0, sys = false, landscape = false) {
+export async function startJob(userId, topic, long = false, char = false, scenesWanted = 0, sys = false, landscape = false, manhwa = false) {
   const t = String(topic || '').trim().slice(0, 200);
   if (t.length < 3) throw Object.assign(new Error('Tell me what the video is about.'), { status: 400 });
   await VideoJob.updateMany({ userId, status: { $nin: ['done', 'failed'] }, updatedAt: { $lt: new Date(Date.now() - 20 * 60000) } }, { status: 'failed', error: 'This one got stuck (the server restarted). Please start it again.' });
@@ -48,7 +48,7 @@ export async function startJob(userId, topic, long = false, char = false, scenes
   if (await VideoJob.countDocuments({ userId, status: { $nin: ['done', 'failed'] } }) >= MAX_ACTIVE) throw Object.assign(new Error('One video is already being made. Wait for it to finish.'), { status: 429 });
   if (await VideoJob.countDocuments({ userId, createdAt: { $gt: new Date(Date.now() - 86400000) } }) >= MAX_PER_DAY) throw Object.assign(new Error(`Free limit: ${MAX_PER_DAY} videos per day.`), { status: 429 });
   }
-  return VideoJob.create({ userId, topic: t, long: !!long, char: !!char, scenesWanted: Math.min(160, Math.max(0, Math.round(scenesWanted) || 0)), landscape: !!landscape, startedAt: new Date() });
+  return VideoJob.create({ userId, topic: t, long: !!long, char: !!char, scenesWanted: Math.min(160, Math.max(0, Math.round(scenesWanted) || 0)), landscape: !!landscape, manhwa: !!manhwa, startedAt: new Date() });
 }
 
 export async function startLyricJob(userId, title, buf) {
@@ -68,9 +68,9 @@ async function fontsDir() {
   return d;
 }
 const assTime = t => { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), sec = (t % 60).toFixed(2).padStart(5, '0'); return `${h}:${String(m).padStart(2, '0')}:${sec}`; };
-function assFile(text, a, b) {
-  const dev = /[\u0900-\u097F]/.test(text); const clean = String(text).replace(/[{}\\]/g, '').replace(/\s+/g, ' ').trim();
-  return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Default,${dev ? 'Noto Sans Devanagari' : 'Noto Sans'},40,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,24,24,110,1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\nDialogue: 0,${assTime(a)},${assTime(b)},Default,,0,0,0,,${clean}\n`;
+function assFile(text, a, b, pw = W, ph = H) {
+  const dev = /[\u0900-\u097F]/.test(text); const clean = String(text).replace(/[{}\\]/g, '').replace(/\s+/g, ' ').trim(); const fsz = pw > ph ? 32 : 40, mv = Math.round(ph * 0.08);
+  return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${pw}\nPlayResY: ${ph}\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Default,${dev ? 'Noto Sans Devanagari' : 'Noto Sans'},${fsz},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,24,24,${mv},1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\nDialogue: 0,${assTime(a)},${assTime(b)},Default,,0,0,0,,${clean}\n`;
 }
 async function lyricScript(job) {
   let song = null; for (let k = 0; k < 8 && !song; k++) { song = await VideoBlob.findOne({ jobId: job._id, kind: 'song' }); if (!song) await new Promise(r => setTimeout(r, 2500)); } if (!song) throw new Error('The song file is missing.');
@@ -100,7 +100,7 @@ const ARC = 'The scenes must be ONE connected story with a clear arc: a hook/int
 const jsonOf = t => { const m = String(t || '').match(/\{[\s\S]*\}/)?.[0] || ''; for (const v of [m, m.replace(/,\s*([}\]])/g, '$1'), m.replace(/[\u201c\u201d]/g, "'").replace(/,\s*([}\]])/g, '$1')]) { try { return JSON.parse(v); } catch {} } return null; };
 async function script(job) {
   const N = job.long ? (job.scenesWanted >= 14 ? Math.min(160, job.scenesWanted) : LONG_SCENES) : SCENES; let outline = '';
-  if (job.char && !job.charDesc) { try { const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: 'Describe the MAIN character of this story in ONE English sentence of 25 to 35 words for an illustrator: age, build, face, hair, clothes with colors, any signature prop. Reply with only that sentence.' }, { role: 'user', content: `Topic: ${job.topic}` }] }); job.charDesc = String(m.content || '').replace(/\s+/g, ' ').slice(0, 400); } catch { job.charDesc = ''; } }
+  if (!job.lyric && !job.charDesc) { try { const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: 'Describe the MAIN character of this story in ONE English sentence of 25 to 35 words for an illustrator: age, build, face, hair, clothes with colors, any signature prop. Reply with only that sentence.' }, { role: 'user', content: `Topic: ${job.topic}` }] }); job.charDesc = String(m.content || '').replace(/\s+/g, ' ').slice(0, 400); } catch { job.charDesc = ''; } }
   if (job.long) {
     let o = null;
     for (let k = 0; k < 3 && !o; k++) { const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: `You plan a short story for a narrated video. Reply with ONLY valid JSON (no double quote characters inside text): {"title":"...","subject":"...","acts":[{"act":"intro","beat":"..."},{"act":"buildup","beat":"..."},{"act":"twist","beat":"..."},{"act":"climax","beat":"..."},{"act":"ending","beat":"..."}]}. Each beat is 1 or 2 sentences. "subject" is the story's main visible subject in 2 or 3 plain English words (e.g. "watchman tower"), never flags, countries, war, weapons, religion or politics. The title is in the same language as the narration. Same language as the user's topic (Hindi in Devanagari if the topic is Hindi or Hinglish). One coherent story with named or clearly described characters.` }, { role: 'user', content: `Topic: ${job.topic}` }] }); const j = jsonOf(m.content); if (j && Array.isArray(j.acts) && j.acts.length >= 4) o = j; }
@@ -147,15 +147,18 @@ async function stitch(job) {
   try {
     const clips = await VideoBlob.find({ jobId: job._id, kind: 'clip' }).sort('idx');
     if (!clips.length) throw new Error('No clips to stitch.');
-    const segs = []; let voiced = 0;
+    const segs = []; let voiced = 0; const fd = await fontsDir().catch(() => null);
     for (const c of clips) {
       job.stage = `Joining clip ${segs.length + 1} of ${clips.length}`; await job.save().catch(() => {});
       const cf = path.join(dir, `c${c.idx}.mp4`); await fs.writeFile(cf, c.data); const cd = (await dur(cf)) || 4;
       const ab = await VideoBlob.findOne({ jobId: job._id, kind: 'audio', idx: c.idx }); let af = null, ad = 0;
       if (ab) { const raw = path.join(dir, `a${c.idx}.mp3`); await fs.writeFile(raw, ab.data); af = path.join(dir, `t${c.idx}.mp3`); try { await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', raw, '-af', 'silenceremove=start_periods=1:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_threshold=-50dB,areverse', af]); } catch { af = raw; } ad = await dur(af); if (!ad && af !== raw) { af = raw; ad = await dur(af); } if (ad) voiced++; else af = null; }
       const D = af ? Math.max(1.5, ad + 0.12) : cd; const seg = path.join(dir, `s${c.idx}.mp4`);
-      const dm = DIMS(job); const vf = `scale=${dm.W}:${dm.H}:force_original_aspect_ratio=increase,crop=${dm.W}:${dm.H},fps=24`;
-      await run(ffmpegPath, ['-y', '-loglevel', 'error', '-stream_loop', '-1', '-i', cf, ...(af ? ['-i', af] : ['-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo']), '-vf', vf, '-af', 'aresample=44100,apad', '-t', D.toFixed(2), '-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', job.long ? '30' : '26', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '44100', '-ac', '2', '-shortest', '-movflags', '+faststart', seg], { timeout: 120000 });
+      const dm = DIMS(job);
+      let vf = `scale=${dm.W}:${dm.H}:force_original_aspect_ratio=increase,crop=${dm.W}:${dm.H},fps=24,fade=t=in:st=0:d=0.3,fade=t=out:st=${(D - 0.3).toFixed(2)}:d=0.3`;
+      const say = String((job.scenes[c.idx] || {}).say || '').trim(); let cw;
+      if (fd && say) { await fs.writeFile(path.join(dir, `u${c.idx}.ass`), assFile(say, 0.05, Math.max(0.3, D - 0.1), dm.W, dm.H)); vf += `,subtitles=u${c.idx}.ass:fontsdir=${fd}`; cw = dir; }
+      await run(ffmpegPath, ['-y', '-loglevel', 'error', '-stream_loop', '-1', '-i', cf, ...(af ? ['-i', af] : ['-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo']), '-vf', vf, '-af', 'aresample=44100,apad', '-t', D.toFixed(2), '-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', job.long ? '30' : '26', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '44100', '-ac', '2', '-shortest', '-movflags', '+faststart', seg], { cwd: cw, timeout: 120000 });
       segs.push(`file '${seg}'`);
     }
     await fs.writeFile(path.join(dir, 'l.txt'), segs.join('\n'));
@@ -192,7 +195,7 @@ async function stitchLyric(job) {
     job.bytes = data.length; job.status = 'done'; job.note = `Lyric video: ${clips.length} lyric lines, original song audio, burned-in captions, vertical 9:16${job.note ? ' · ' + job.note : ''}`; await job.save();
   } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
-async function stillClip(prompt, i, given, dm = { W, H }) {
+async function stillClip(prompt, i, given, dm = { W, H }, moody = false) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-k-'));
   try {
     const q = encodeURIComponent(`${String(prompt).slice(0, 350)}, vertical cinematic photo, vivid light`);
@@ -203,8 +206,20 @@ async function stillClip(prompt, i, given, dm = { W, H }) {
     }
     if (!buf) throw new Error(`The free picture service did not answer (${String(err).slice(0, 60)}).`);
     const img = path.join(dir, 'i.jpg'), out = path.join(dir, 'k.mp4'); await fs.writeFile(img, buf);
-    const z = i % 2 ? "'1.28-0.0020*on'" : "'1+0.0020*on'";
-    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-loop', '1', '-i', img, '-vf', `scale=1080:-2,zoompan=z=${z}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=96:s=${dm.W}x${dm.H}:fps=24,format=yuv420p`, '-t', '4', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26', '-movflags', '+faststart', out], { timeout: 90000 });
+    const mv = i % 4; const z = mv === 1 ? "'1.28-0.0020*on'" : mv === 0 ? "'1+0.0020*on'" : "'1.14'";
+    const xp = mv === 2 ? "'(iw-iw/zoom)*on/96'" : mv === 3 ? "'(iw-iw/zoom)*(1-on/96)'" : "'iw/2-(iw/zoom/2)'";
+    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-loop', '1', '-i', img, '-vf', `scale=1080:-2,zoompan=z=${z}:x=${xp}:y='ih/2-(ih/zoom/2)':d=96:s=${dm.W}x${dm.H}:fps=24${moody ? ',vignette=PI/5,noise=alls=7:allf=t' : ''},format=yuv420p`, '-t', '4', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26', '-movflags', '+faststart', out], { timeout: 90000 });
+    return await fs.readFile(out);
+  } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}
+
+// Manhwa recap motion: slow vertical scroll over a tall comic panel, like reading a webtoon.
+async function scrollClip(given, i, dm = { W, H }) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-s-'));
+  try {
+    const img = path.join(dir, 'i.jpg'), out = path.join(dir, 'k.mp4'); await fs.writeFile(img, given);
+    const y = i % 2 ? `'(ih-${dm.H})*(1-min(t\\,3.9)/3.9)'` : `'(ih-${dm.H})*min(t\\,3.9)/3.9'`;
+    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-loop', '1', '-i', img, '-vf', `scale=${dm.W}:-2,crop=${dm.W}:${dm.H}:x=0:y=${y},fps=24,vignette=PI/6,format=yuv420p`, '-t', '4', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26', '-movflags', '+faststart', out], { timeout: 90000 });
     return await fs.readFile(out);
   } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
@@ -248,14 +263,19 @@ async function stockClip(job, i) {
 async function charClip(job, i) {
   let ref = await VideoBlob.findOne({ jobId: job._id, kind: 'charref' });
   const get = async url => { const r = await fetch(url, { signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Could not download the character picture.'); return Buffer.from(await r.arrayBuffer()); };
+  if (!job.charDesc) { try { const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: 'Describe the MAIN character of this story in ONE English sentence of 25 to 35 words for an illustrator: age, build, face, hair, clothes with colors, any signature prop. Reply with only that sentence.' }, { role: 'user', content: `Topic: ${job.topic}` }] }); job.charDesc = String(m.content || '').replace(/\s+/g, ' ').slice(0, 400); await job.save().catch(() => {}); } catch { job.charDesc = ''; } }
+  const man = !!job.manhwa;
+  const style = man ? 'Korean manhwa webtoon style, bold ink lineart, dramatic screentone shading, vibrant colors' : '2D cel-shaded animation style, flat colors, clean outlines';
+  const dw = man ? 768 : job.landscape ? 1024 : 768, dh = man ? 1792 : job.landscape ? 576 : 1024;
   if (!ref) {
     await stage(job, 'Drawing the main character');
-    const url = await generateImage({ prompt: `${job.charDesc || job.topic}, full body, standing, plain simple background, 2D cel-shaded animation style, flat colors, clean outlines`, width: 768, height: 1024 });
+    const url = await generateImage({ prompt: `${job.charDesc || job.topic}, full body, standing, plain simple background, ${style}`, width: dw, height: dh });
     ref = await VideoBlob.create({ jobId: job._id, kind: 'charref', idx: 0, data: await get(url) });
   }
   await stage(job, `Clip ${i + 1} of ${job.scenes.length}: drawing scene`);
-  const url = await generateWithReference({ image: ref.data, prompt: `The same character with the same face, hair and clothes. ${String(job.scenes[i].prompt).slice(0, 380)}. 2D cel-shaded animated illustration, dark moody lighting, vertical frame.` });
-  return stillClip(job.scenes[i].prompt, i, await get(url));
+  const url = await generateWithReference({ image: ref.data, prompt: `The same character with the same face, hair and clothes. ${String(job.scenes[i].prompt).slice(0, 380)}. ${style}, ${man ? 'comic panel composition, no text, no speech bubbles, ' : ''}dark moody lighting, ${job.landscape && !man ? 'wide cinematic 16:9 frame' : 'tall frame'}.` });
+  const img = await get(url);
+  return man ? scrollClip(img, i, DIMS(job)) : stillClip(job.scenes[i].prompt, i, img, DIMS(job), true);
 }
 const NOTE = { agnes: 'Free AI-video GPU was used up today, so this one uses Agnes AI video', stock: 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)', still: 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion' };
 let agnesOffUntil = 0;
@@ -267,7 +287,8 @@ const stage = async (job, t) => { job.stage = t; await job.save().catch(() => {}
 async function makeScene(job, i) {
   const tag = `Clip ${i + 1} of ${job.scenes.length}`;
   let data;
-  const useChar = !!job.char; if (useChar) { data = await charClip(job, i); job.note = 'AI pictures with one fixed character (FLUX Kontext), slow pan and zoom'; }
+  const useChar = !job.lyric;
+  if (useChar) { data = await charClip(job, i); job.note = job.manhwa ? 'AI manhwa panels with one fixed character (FLUX Kontext), slow scroll, voiceover' : 'AI animated frames with one fixed character (FLUX Kontext), cinematic motion'; }
   if (!useChar && job.mode === 'ai' && Date.now() - gpuDownAt < 1800000 && fallbackMode() !== 'still') { job.mode = fallbackMode(); job.note = NOTE[job.mode]; await job.save(); }
   if (!useChar && (job.mode === 'ai' || !job.mode)) {
     try {
@@ -315,6 +336,7 @@ async function step(job) {
       console.error('scene', i, e.message.slice(0, 140)); job = await VideoJob.findById(job._id); if (!job) return;
       const sc = job.scenes[i];
       if (sc.state === 'ok') return;
+      if (/used up|quota|GPU/i.test(String(e.message))) { job.stage = 'Free GPU quota is used up - waiting for the daily refill'; job.lockUntil = new Date(Date.now() + 30 * 60000); await job.save(); return; }
       sc.tries = (sc.tries || 0) + 1; if (sc.tries >= 2) { sc.state = 'skip'; job.note = `Some clips were skipped (${String(e.message).slice(0, 70)})`; }
       job.stage = sc.state === 'skip' ? `Clip ${i + 1} skipped, moving on` : `Clip ${i + 1} stalled, retrying`; await job.save();
     }
