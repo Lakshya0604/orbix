@@ -164,6 +164,12 @@ async function stitch(job) {
     await fs.writeFile(path.join(dir, 'l.txt'), segs.join('\n'));
     const out = path.join(dir, 'out.mp4');
     await run(ffmpegPath, ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'l.txt'), '-c', 'copy', '-movflags', '+faststart', out], { timeout: 120000 });
+    // Horror atmosphere: a low synthesized drone (55 Hz sine + lowpassed brown noise) mixed under the whole video; the voice stays on top. If this pass fails, the original mix is kept.
+    const outD = path.join(dir, 'outd.mp4');
+    try {
+      await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', out, '-f', 'lavfi', '-i', 'sine=frequency=55', '-f', 'lavfi', '-i', 'anoisesrc=color=brown:amplitude=0.7', '-filter_complex', '[1:a]volume=0.15[s];[2:a]lowpass=f=200,volume=0.35[n];[0:a][s][n]amix=inputs=3:duration=first:dropout_transition=0,alimiter=limit=0.95[a]', '-map', '0:v', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outD], { timeout: 180000 });
+      await fs.rename(outD, out); job.note = `${job.note ? job.note + ' · ' : ''}horror atmosphere`;
+    } catch { }
     let data = await fs.readFile(out);
     if (data.length > (job.scenesWanted ? 150e6 : 15.5e6)) throw new Error('This video is too long to save on the free plan yet. Try a shorter story.');
     await VideoBlob.deleteMany({ jobId: job._id, kind: 'final' }); for (let p = 0; p * 7e6 < data.length; p++) await VideoBlob.create({ jobId: job._id, kind: 'final', idx: p, data: data.subarray(p * 7e6, (p + 1) * 7e6) });
