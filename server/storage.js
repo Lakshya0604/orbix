@@ -17,8 +17,12 @@ async function repo() {
   return repoId;
 }
 async function lfsUpload(id, key, buf) {
+  try { return await lfsUploadInner(id, key, buf); }
+  catch (e) { throw new Error(`lfsUpload:${key}: ${e.message}`.slice(0, 180)); }
+}
+async function lfsUploadInner(id, key, buf) {
   const oid = crypto.createHash('sha256').update(buf).digest('hex');
-  const br = await fetch(`${API}/datasets/${id}.git/info/lfs/objects/batch`, { method: 'POST', headers: { ...H(), 'content-type': 'application/json', accept: 'application/vnd.git-lfs+json' }, body: JSON.stringify({ operation: 'upload', transfers: ['basic'], objects: [{ oid, size: buf.length }] }), signal: AbortSignal.timeout(60000) });
+  const br = await fetch(`${API}/datasets/${id}.git/info/lfs/objects/batch` /* lfsbatch */, { method: 'POST', headers: { ...H(), 'content-type': 'application/json', accept: 'application/vnd.git-lfs+json' }, body: JSON.stringify({ operation: 'upload', transfers: ['basic'], objects: [{ oid, size: buf.length }] }), signal: AbortSignal.timeout(60000) });
   if (!br.ok) throw new Error(`HF LFS batch failed (HTTP ${br.status}): ${(await br.text()).slice(0, 120)}`);
   const bj = await br.json();
   const act = bj.objects?.[0]?.actions;
@@ -30,6 +34,10 @@ async function lfsUpload(id, key, buf) {
   return { oid, size: buf.length };
 }
 async function commit(id, ops, summary) {
+  try { return await commitInner(id, ops, summary); }
+  catch (e) { throw new Error(`commit:${summary}: ${e.message}`.slice(0, 180)); }
+}
+async function commitInner(id, ops, summary) {
   const body = JSON.stringify({ key: 'header', value: { summary } }) + '\n' + ops.map(o => JSON.stringify(o)).join('\n') + '\n';
   const r = await fetch(`${API}/api/datasets/${id}/commit/main`, { method: 'POST', headers: { ...H(), 'content-type': 'application/x-ndjson' }, body, signal: AbortSignal.timeout(60000) });
   if (!r.ok) throw new Error(`HF commit failed (HTTP ${r.status}): ${(await r.text()).slice(0, 160)}`);
