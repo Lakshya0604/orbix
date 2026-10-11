@@ -1,5 +1,6 @@
 // Background "make a Short" jobs: topic -> LLM script -> one clip per scene -> ffmpeg stitch -> mp4 stored in Mongo.
 import mongoose from 'mongoose';
+import { putBlob, getBlob, delBlob } from './storage.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
@@ -34,10 +35,38 @@ const sanitizeKw = (kw, subject, shot) => {
 export const VideoJob = model('VideoJob', new Schema({
   userId: { type: Schema.Types.ObjectId, index: true }, topic: String, title: { type: String, default: '' },
   status: { type: String, default: 'queued', index: true }, // queued, scripting, clips, stitching, done, failed
-  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, manhwa: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, landscape: { type: Boolean, default: false }, startedAt: Date,
+  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, manhwa: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, landscape: { type: Boolean, default: false }, startedAt: Date, fileDeletedAt: Date,
   lockUntil: { type: Date, default: null }, bytes: { type: Number, default: 0 }, voiceVia: { type: String, default: '' },
 }, { timestamps: true }));
 export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer, gen: { type: Boolean, default: false } }, { timestamps: true }));
+
+export const blobKey = b => `videos/${b.jobId}/${b.kind}-${b.idx ?? 0}.bin`;
+export async function blobBytes(b) { if (!b) return null; if (b.data && b.data.length) return b.data; return await getBlob(blobKey(b)); }
+export async function removeJobFiles(jobId) {
+  const bs = await VideoBlob.find({ jobId });
+  for (const b of bs) { try { await delBlob(blobKey(b)); } catch (e) { console.error('hf del', e.message); } }
+  await VideoBlob.deleteMany({ jobId });
+  await VideoJob.updateOne({ _id: jobId }, { $set: { fileDeletedAt: new Date() } });
+}
+export async function sweepBlobs(limit = 40) {
+  const docs = await VideoBlob.find({ data: { $exists: true, $ne: null } }).limit(limit * 4);
+  let moved = 0, dropped = 0, failed = 0; const cache = new Map();
+  for (const b of docs) {
+    if (moved + dropped >= limit) break;
+    try {
+      let st = cache.get(String(b.jobId));
+      if (st === undefined) { const j = await VideoJob.findById(b.jobId).select('status').lean(); st = j ? j.status : 'gone'; cache.set(String(b.jobId), st); }
+      if (st === 'failed' || st === 'gone') { await VideoBlob.deleteOne({ _id: b._id }); dropped++; continue; }
+      if (!b.data || !b.data.length) continue;
+      await putBlob(blobKey(b), b.data);
+      await VideoBlob.updateOne({ _id: b._id }, { $unset: { data: 1 } });
+      moved++;
+    } catch (e) { failed++; console.error('sweep', String(e.message).slice(0, 120)); }
+  }
+  const remaining = await VideoBlob.countDocuments({ data: { $exists: true, $ne: null } });
+  return { moved, dropped, failed, remaining };
+}
+
 
 export const MAX_ACTIVE = 1, MAX_PER_DAY = 4, SCENES = 4, LONG_SCENES = 14;
 export async function startJob(userId, topic, long = false, char = false, scenesWanted = 0, sys = false, landscape = false, manhwa = false) {
@@ -150,9 +179,9 @@ async function stitch(job) {
     const segs = []; let voiced = 0; const fd = await fontsDir().catch(() => null);
     for (const c of clips) {
       job.stage = `Joining clip ${segs.length + 1} of ${clips.length}`; await job.save().catch(() => {});
-      const cf = path.join(dir, `c${c.idx}.mp4`); await fs.writeFile(cf, c.data); const cd = (await dur(cf)) || 4;
+      const cf = path.join(dir, `c${c.idx}.mp4`); await fs.writeFile(cf, await blobBytes(c)); const cd = (await dur(cf)) || 4;
       const ab = await VideoBlob.findOne({ jobId: job._id, kind: 'audio', idx: c.idx }); let af = null, ad = 0;
-      if (ab) { const raw = path.join(dir, `a${c.idx}.mp3`); await fs.writeFile(raw, ab.data); af = path.join(dir, `t${c.idx}.mp3`); try { await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', raw, '-af', 'silenceremove=start_periods=1:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_threshold=-50dB,areverse', af]); } catch { af = raw; } ad = await dur(af); if (!ad && af !== raw) { af = raw; ad = await dur(af); } if (ad) voiced++; else af = null; }
+      if (ab) { const raw = path.join(dir, `a${c.idx}.mp3`); await fs.writeFile(raw, await blobBytes(ab)); af = path.join(dir, `t${c.idx}.mp3`); try { await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', raw, '-af', 'silenceremove=start_periods=1:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_threshold=-50dB,areverse', af]); } catch { af = raw; } ad = await dur(af); if (!ad && af !== raw) { af = raw; ad = await dur(af); } if (ad) voiced++; else af = null; }
       const D = af ? Math.max(1.5, ad + 0.12) : cd; const seg = path.join(dir, `s${c.idx}.mp4`);
       const dm = DIMS(job);
       let vf = `scale=${dm.W}:${dm.H}:force_original_aspect_ratio=increase,crop=${dm.W}:${dm.H},fps=24,fade=t=in:st=0:d=0.3,fade=t=out:st=${(D - 0.3).toFixed(2)}:d=0.3`;
@@ -173,7 +202,7 @@ async function stitch(job) {
     let data = await fs.readFile(out);
     if (data.length > (job.scenesWanted ? 150e6 : 15.5e6)) throw new Error('This video is too long to save on the free plan yet. Try a shorter story.');
     await VideoBlob.deleteMany({ jobId: job._id, kind: 'final' }); for (let p = 0; p * 7e6 < data.length; p++) await VideoBlob.create({ jobId: job._id, kind: 'final', idx: p, data: data.subarray(p * 7e6, (p + 1) * 7e6) });
-    job.bytes = data.length; job.status = 'done'; job.note = `${clips.length} clips, ${voiced ? `${voiced} with voiceover${job.voiceVia ? ` (${job.voiceVia})` : ''}` : 'no voiceover (voice service was busy)'}, ${job.landscape ? 'landscape 16:9' : 'vertical 9:16'}${job.note ? ' · ' + job.note : ''}`; await job.save();
+    sweepBlobs(400).catch(e => console.error('sweep-after-stitch', e.message)); job.bytes = data.length; job.status = 'done'; job.note = `${clips.length} clips, ${voiced ? `${voiced} with voiceover${job.voiceVia ? ` (${job.voiceVia})` : ''}` : 'no voiceover (voice service was busy)'}, ${job.landscape ? 'landscape 16:9' : 'vertical 9:16'}${job.note ? ' · ' + job.note : ''}`; await job.save();
   } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
 
@@ -181,13 +210,13 @@ async function stitch(job) {
 async function stitchLyric(job) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-v-'));
   try {
-    const fd = await fontsDir(); const song = await VideoBlob.findOne({ jobId: job._id, kind: 'song' }); const sf = path.join(dir, 'song.bin'); await fs.writeFile(sf, song.data);
+    const fd = await fontsDir(); const song = await VideoBlob.findOne({ jobId: job._id, kind: 'song' }); const sf = path.join(dir, 'song.bin'); await fs.writeFile(sf, await blobBytes(song));
     const clips = await VideoBlob.find({ jobId: job._id, kind: 'clip' }).sort('idx'); if (!clips.length) throw new Error('No clips to stitch.');
     const total = job.songDur || (job.scenes[job.scenes.length - 1].t1 + 1); const segs = [];
     for (let n = 0; n < clips.length; n++) {
       const c = clips[n]; const sc = job.scenes[c.idx]; const nxt = clips[n + 1] ? job.scenes[clips[n + 1].idx].t0 : total; const start = n === 0 ? 0 : sc.t0; const D = Math.max(1.2, nxt - start);
       job.stage = `Joining clip ${n + 1} of ${clips.length}`; await job.save().catch(() => {});
-      const cf = path.join(dir, `c${c.idx}.mp4`); await fs.writeFile(cf, c.data); const seg = path.join(dir, `s${c.idx}.mp4`); const ass = path.join(dir, `a${c.idx}.ass`);
+      const cf = path.join(dir, `c${c.idx}.mp4`); await fs.writeFile(cf, await blobBytes(c)); const seg = path.join(dir, `s${c.idx}.mp4`); const ass = path.join(dir, `a${c.idx}.ass`);
       await fs.writeFile(ass, assFile(sc.say, Math.max(0, sc.t0 - start), Math.min(D, sc.t1 - start + 0.25)));
       await run(ffmpegPath, ['-y', '-loglevel', 'error', '-stream_loop', '-1', '-i', cf, '-vf', `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=24,subtitles=a${c.idx}.ass:fontsdir=${fd}`, '-an', '-t', D.toFixed(2), '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', '-pix_fmt', 'yuv420p', seg], { cwd: dir, timeout: 120000 });
       segs.push(`file '${seg}'`);
@@ -296,7 +325,7 @@ async function charClip(job, i) {
   let img = null;
   if (ref) {
     try {
-      const url = await generateWithReference({ image: ref.data, prompt: `The same character with the same face, hair and clothes. ${String(job.scenes[i].prompt).slice(0, 380)}. ${style}, ${man ? 'comic panel composition, no text, no speech bubbles, ' : ''}dark moody lighting, ${job.landscape && !man ? 'wide cinematic 16:9 frame' : 'tall frame'}.` });
+      const url = await generateWithReference({ image: await blobBytes(ref), prompt: `The same character with the same face, hair and clothes. ${String(job.scenes[i].prompt).slice(0, 380)}. ${style}, ${man ? 'comic panel composition, no text, no speech bubbles, ' : ''}dark moody lighting, ${job.landscape && !man ? 'wide cinematic 16:9 frame' : 'tall frame'}.` });
       img = await get(url);
     } catch (e) { console.error('sceneimg', String(e.message).slice(0, 100)); }
   }
@@ -395,11 +424,11 @@ async function tick() {
     await VideoJob.updateOne({ _id: job._id }, { lockUntil: null });
   } catch (e) { console.error('video tick', e.message); } finally { busy = false; }
 }
-export const startWorker = () => { setInterval(tick, 4000).unref?.(); };
+export const startWorker = () => { setInterval(tick, 4000).unref?.(); setInterval(() => sweepBlobs(20).catch(e => console.error('sweep-timer', e.message)), 15 * 60 * 1000).unref?.(); };
 const progress = j => {
   const n = (j.scenes || []).length, done = (j.scenes || []).filter(s => s.state !== 'wait').length;
   const pct = { queued: 3, scripting: 8, clips: Math.round(12 + 76 * done / Math.max(1, n)), stitching: 92, done: 100, failed: 0 }[j.status] ?? 0;
   const left = j.status === 'clips' ? (n - done) * 30 + 60 : j.status === 'stitching' ? 60 : j.status === 'scripting' ? 90 + (n || (j.long ? 14 : 4)) * 30 : 0;
   return { pct, etaSec: ['done', 'failed'].includes(j.status) ? 0 : left };
 };
-export const publicJob = j => ({ ...progress(j), long: !!j.long, stage: j.stage || '', id: String(j._id), topic: j.topic, title: j.title, status: j.status, scenes: (j.scenes || []).map(s => s.state), error: j.error || null, note: j.note || null, bytes: j.bytes, at: j.createdAt });
+export const publicJob = j => ({ ...progress(j), long: !!j.long, stage: j.stage || '', id: String(j._id), topic: j.topic, title: j.title, status: j.status, scenes: (j.scenes || []).map(s => s.state), error: j.error || null, note: j.note || null, bytes: j.bytes, at: j.createdAt, fileDeleted: !!j.fileDeletedAt });
