@@ -369,8 +369,10 @@ app.get('/api/videos/:id/file', auth, wrap(async (q, r) => {
 }));
 app.delete('/api/videos/:id', auth, wrap(async (q, r) => { const job = await VideoJob.findOneAndDelete({ _id: q.params.id, userId: q.user._id }); if (job) await removeJobFiles(job._id); r.json({ ok: true }); }));
 // end-to-end self-test of the Short pipeline with a system user (runs once per hour at most, no secrets in the answer)
+const HEALTH_KEY = process.env.HEALTH_KEY || '';
+const healthGate = (q, r, n) => { const k = String(q.query.key || q.headers['x-health-key'] || ''); if (!HEALTH_KEY || k !== HEALTH_KEY) return r.status(403).json({ error: 'Forbidden' }); n(); };
 const SELFTEST = new mongoose.Types.ObjectId('000000000000000000000001');
-app.get('/api/health/pipeline', wrap(async (q, r) => {
+app.get('/api/health/pipeline', healthGate, wrap(async (q, r) => {
   if (!imageEnabled()) return r.json({ configured: false });
   if (q.query.cancel) { const cj = await VideoJob.findById(String(q.query.cancel)); if (cj && !['done', 'failed'].includes(cj.status)) { cj.status = 'failed'; cj.error = 'Cancelled: superseded by the new AI-animation pipeline.'; await cj.save(); } return r.json({ cancelled: !!cj }); }
   const wantLong = q.query.long === '1'; const wantChar = q.query.char === '1'; const custom = typeof q.query.topic === 'string' && q.query.topic.trim() ? q.query.topic.trim().slice(0, 160) : ''; const want = custom || (wantLong && q.query.lang === 'hi' ? 'एक अकेला चौकीदार जिसे बंद मीनार के दरवाज़े के अंदर से दस्तक सुनाई देती है' : wantLong ? 'a lonely lighthouse keeper who hears knocking from inside the locked tower door' : q.query.lang === 'hi' ? 'चाँद पर इंसान के पहले कदम की कहानी' : 'a lighthouse on a stormy coast at night');
@@ -380,7 +382,7 @@ app.get('/api/health/pipeline', wrap(async (q, r) => {
   const openJobs = await VideoJob.find({ status: { $nin: ['done', 'failed'] } }).sort('createdAt').select('status stage createdAt lockUntil userId topic title scenes.state').lean();
   r.json({ ...publicJob(job), final: job.status === 'done' ? (await VideoBlob.findOne({ jobId: job._id, kind: 'final' }).select('_id').lean()) ? 'stored' : 'missing' : null, queue: { open: openJobs.length, jobs: openJobs.slice(0, 6).map(j => ({ id: String(j._id), status: j.status, stage: j.stage, topic: (j.topic || '').slice(0, 60), title: j.title || '', ok: (j.scenes || []).filter(x => x.state === 'ok').length, ageMin: Math.round((Date.now() - new Date(j.createdAt)) / 60000) })) } });
 }));
-app.get('/api/health/media-sweep', wrap(async (q, r) => { r.json(await sweepBlobs(Math.min(200, Math.max(1, Number(q.query.limit) || 40)))); }));
+app.get('/api/health/media-sweep', healthGate, wrap(async (q, r) => { r.json(await sweepBlobs(Math.min(200, Math.max(1, Number(q.query.limit) || 40)))); }));
 app.get('/api/health/agnes', wrap(async (q, r) => {
   const key = process.env.AGNES_API_KEY; if (!key) return r.json({ configured: false });
   const H = { authorization: `Bearer ${key}`, 'content-type': 'application/json' }; const out = { configured: true };
@@ -388,7 +390,7 @@ app.get('/api/health/agnes', wrap(async (q, r) => {
   try { const c = await fetch('https://apihub.agnes-ai.com/v1/videos', { method: 'POST', headers: H, body: JSON.stringify({ model: 'agnes-video-v2.0', prompt: 'a red balloon floating up in a blue sky', width: 576, height: 1024, num_frames: 97, frame_rate: 24 }), signal: AbortSignal.timeout(20000) }); const t = await c.text(); out.create = { status: c.status, body: t.replace(/\s+/g, ' ').replace(key, '***').slice(0, 500) }; } catch (e) { out.create = { error: e.message.slice(0, 100) }; }
   r.json(out);
 }));
-app.get('/api/health/pipeline/clips', wrap(async (q, r) => {
+app.get('/api/health/pipeline/clips', healthGate, wrap(async (q, r) => {
   const job = q.query.job ? await VideoJob.findById(String(q.query.job)) : await VideoJob.findOne({ userId: SELFTEST }).sort('-createdAt');
   if (!job) throw bad('No job.', 404);
   const i = Math.max(0, Number(q.query.idx) || 0);
@@ -396,8 +398,8 @@ app.get('/api/health/pipeline/clips', wrap(async (q, r) => {
   if (!b) throw bad('No clip at that index.', 404);
   r.set({ 'content-type': 'video/mp4', 'content-length': b.data.length }).send(b.data);
 }));
-app.get('/api/health/pipeline/script', wrap(async (q, r) => { const job = await VideoJob.findOne({ userId: SELFTEST }).sort('-createdAt'); r.json(job ? { topic: job.topic, title: job.title, long: job.long, status: job.status, stage: job.stage, scenes: job.scenes.map(x => ({ act: x.act, kw: x.kw, state: x.state, say: x.say })) } : {}); }));
-app.get('/api/health/pipeline/file', wrap(async (q, r) => {
+app.get('/api/health/pipeline/script', healthGate, wrap(async (q, r) => { const job = await VideoJob.findOne({ userId: SELFTEST }).sort('-createdAt'); r.json(job ? { topic: job.topic, title: job.title, long: job.long, status: job.status, stage: job.stage, scenes: job.scenes.map(x => ({ act: x.act, kw: x.kw, state: x.state, say: x.say })) } : {}); }));
+app.get('/api/health/pipeline/file', healthGate, wrap(async (q, r) => {
   const job = q.query.job ? await VideoJob.findById(String(q.query.job)) : await VideoJob.findOne({ userId: SELFTEST, status: 'done' }).sort('-createdAt');
   if (!job) throw bad('No job.', 404);
   const bs = await VideoBlob.find({ jobId: job._id, kind: 'final' }).sort('idx');
