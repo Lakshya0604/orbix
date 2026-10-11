@@ -50,7 +50,7 @@ export async function removeJobFiles(jobId) {
 }
 export async function sweepBlobs(limit = 40) {
   const docs = await VideoBlob.find({ data: { $exists: true, $ne: null } }).limit(limit * 4);
-  let moved = 0, dropped = 0, failed = 0; const cache = new Map();
+  let moved = 0, dropped = 0, failed = 0, firstErr = null; const cache = new Map();
   for (const b of docs) {
     if (moved + dropped >= limit) break;
     try {
@@ -61,10 +61,10 @@ export async function sweepBlobs(limit = 40) {
       await putBlob(blobKey(b), b.data);
       await VideoBlob.updateOne({ _id: b._id }, { $unset: { data: 1 } });
       moved++;
-    } catch (e) { failed++; console.error('sweep', String(e.message).slice(0, 120)); }
+    } catch (e) { failed++; if (!firstErr) firstErr = String(e.message).slice(0, 200); console.error('sweep', String(e.message).slice(0, 120)); }
   }
   const remaining = await VideoBlob.countDocuments({ data: { $exists: true, $ne: null } });
-  return { moved, dropped, failed, remaining };
+  return { moved, dropped, failed, remaining, firstErr };
 }
 
 
