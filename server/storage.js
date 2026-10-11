@@ -46,6 +46,24 @@ export async function putBlob(key, buf) {
   }
   await commit(id, ops, `add ${key}`);
 }
+export async function putBlobsBulk(items) {
+  const id = await repo();
+  const ops = [{ key: 'file', value: { path: '.gitattributes', content: Buffer.from(GITATTR).toString('base64'), encoding: 'base64' } }];
+  const ok = [], failed = {};
+  for (const { key, buf } of items) {
+    try {
+      if (buf.length > 5e6) {
+        const { oid, size } = await lfsUpload(id, key, buf);
+        ops.push({ key: 'lfsFile', value: { path: key, algo: 'sha256', oid, size } });
+      } else {
+        ops.push({ key: 'file', value: { path: key, content: buf.toString('base64'), encoding: 'base64' } });
+      }
+      ok.push(key);
+    } catch (e) { failed[key] = String(e.message).slice(0, 120); }
+  }
+  if (ok.length) await commit(id, ops, `sweep ${ok.length} blobs`);
+  return { ok, failed };
+}
 export async function getBlob(key) {
   const id = await repo();
   const r = await fetch(`${API}/datasets/${id}/resolve/main/${key}`, { headers: H(), signal: AbortSignal.timeout(180000) });
