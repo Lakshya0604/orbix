@@ -1,6 +1,6 @@
 // Background "make a Short" jobs: topic -> LLM script -> one clip per scene -> ffmpeg stitch -> mp4 stored in Mongo.
 import mongoose from 'mongoose';
-import { putBlob, getBlob, delBlob } from './storage.js';
+import { putBlob, putBlobsBulk, getBlob, delBlob } from './storage.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
@@ -51,17 +51,26 @@ export async function removeJobFiles(jobId) {
 export async function sweepBlobs(limit = 40) {
   const docs = await VideoBlob.find({ data: { $exists: true, $ne: null } }).limit(limit * 4);
   let moved = 0, dropped = 0, failed = 0, firstErr = null; const cache = new Map();
+  const toMove = [];
   for (const b of docs) {
-    if (moved + dropped >= limit) break;
+    if (moved + dropped + toMove.length >= limit) break;
     try {
       let st = cache.get(String(b.jobId));
       if (st === undefined) { const j = await VideoJob.findById(b.jobId).select('status').lean(); st = j ? j.status : 'gone'; cache.set(String(b.jobId), st); }
       if (st === 'failed' || st === 'gone') { await VideoBlob.deleteOne({ _id: b._id }); dropped++; continue; }
       if (!b.data || !b.data.length) continue;
-      await putBlob(blobKey(b), b.data);
-      await VideoBlob.updateOne({ _id: b._id }, { $unset: { data: 1 } });
-      moved++;
+      toMove.push(b);
     } catch (e) { failed++; if (!firstErr) firstErr = String(e.message).slice(0, 200); console.error('sweep', String(e.message).slice(0, 120)); }
+  }
+  if (toMove.length) {
+    try {
+      const res = await putBlobsBulk(toMove.map(b => ({ key: blobKey(b), buf: b.data })));
+      const okKeys = new Set(res.ok);
+      for (const b of toMove) {
+        if (okKeys.has(blobKey(b))) { await VideoBlob.updateOne({ _id: b._id }, { $unset: { data: 1 } }); moved++; }
+        else { failed++; if (!firstErr) firstErr = String(res.failed[blobKey(b)] || 'sweep commit failed').slice(0, 200); }
+      }
+    } catch (e) { failed += toMove.length; firstErr = String(e.message).slice(0, 200); console.error('sweep bulk', String(e.message).slice(0, 120)); }
   }
   const remaining = await VideoBlob.countDocuments({ data: { $exists: true, $ne: null } });
   return { moved, dropped, failed, remaining, firstErr };
