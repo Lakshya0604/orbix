@@ -46,7 +46,7 @@ const GITATTR = ['*.mp4','*.webm','*.mov','*.png','*.jpg','*.jpeg','*.webp','*.g
 export async function putBlob(key, buf) {
   const id = await repo();
   const ops = [{ key: 'file', value: { path: '.gitattributes', content: Buffer.from(GITATTR).toString('base64'), encoding: 'base64' } }];
-  if (buf.length > 5e6) {
+  if (buf.length > 1e6) {
     const { oid, size } = await lfsUpload(id, key, buf);
     ops.push({ key: 'lfsFile', value: { path: key, algo: 'sha256', oid, size } });
   } else {
@@ -60,7 +60,7 @@ export async function putBlobsBulk(items) {
   const ok = [], failed = {};
   for (const { key, buf } of items) {
     try {
-      if (buf.length > 5e6) {
+      if (buf.length > 1e6) {
         const { oid, size } = await lfsUpload(id, key, buf);
         ops.push({ key: 'lfsFile', value: { path: key, algo: 'sha256', oid, size } });
       } else {
