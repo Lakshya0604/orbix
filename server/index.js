@@ -19,7 +19,7 @@ import { runAgent } from './agent.js';
 import { CHAIN, visionDescribe, updateMemory } from './llm.js';
 import { parseModel, modelInfo, runModel, spaceHost, spaceInfo, runSpace } from './hf.js';
 import { generateImage, imageEnabled, generateClip } from './media.js';
-import { VideoJob, VideoBlob, startJob, startLyricJob, startLyricSelftest, startWorker, publicJob } from './video.js';
+import { VideoJob, VideoBlob, startJob, startLyricJob, startLyricSelftest, startWorker, publicJob, blobBytes, removeJobFiles, sweepBlobs } from './video.js';
 import { Doc, Chunk, addDocument, hasDocs, LIMITS } from './rag.js';
 import { chatCompletion } from './llm.js';
 
@@ -347,6 +347,11 @@ app.get('/api/health/image', wrap(async (q, r) => {
 app.get('/api/videos', auth, wrap(async (q, r) => r.json({ enabled: imageEnabled(), jobs: (await VideoJob.find({ userId: q.user._id }).sort('-createdAt').limit(20)).map(publicJob) })));
 app.post('/api/videos', auth, wrap(async (q, r) => { if (!imageEnabled()) throw bad('Video is not configured.'); if (q.user.isGuest) throw bad('Create an account first.', 403); r.status(201).json(publicJob(await startJob(q.user._id, q.body?.topic, !!q.body?.long, !!q.body?.char, 0, false, false, !!q.body?.manhwa))); }));
 app.post('/api/videos/lyric', auth, express.raw({ type: () => true, limit: '15mb' }), wrap(async (q, r) => { if (!imageEnabled()) throw bad('Video is not configured.'); if (q.user.isGuest) throw bad('Create an account first.', 403); let title = ''; try { title = decodeURIComponent(String(q.headers['x-title'] || '')); } catch { /* ignore */ } r.status(201).json(publicJob(await startLyricJob(q.user._id, title, Buffer.isBuffer(q.body) ? q.body : null))); }));
+app.post('/api/videos/:id/remake', auth, wrap(async (q, r) => {
+  const job = await VideoJob.findOne({ _id: q.params.id, userId: q.user._id }); if (!job) throw bad('No such video.', 404);
+  if (!imageEnabled()) throw bad('Video is not configured.');
+  r.status(201).json(publicJob(await startJob(q.user._id, job.topic, !!job.long, !!job.char, job.scenesWanted || 0, false, !!job.landscape, !!job.manhwa)));
+}));
 app.get('/api/health/lyric', wrap(async (q, r) => {
   let job = await VideoJob.findOne({ userId: SELFTEST, lyric: true }).sort('-createdAt');
   if (!job || (Number(q.query.fresh) > 0 && new Date(job.createdAt).getTime() < Number(q.query.fresh))) { await VideoJob.deleteMany({ userId: SELFTEST, lyric: true, status: { $in: ['done', 'failed'] } }); job = await startLyricSelftest(SELFTEST); }
@@ -355,11 +360,14 @@ app.get('/api/health/lyric', wrap(async (q, r) => {
 app.get('/api/health/lyric/file', wrap(async (_q, r) => { const job = await VideoJob.findOne({ userId: SELFTEST, lyric: true, status: 'done' }).sort('-createdAt'); const bs = job && await VideoBlob.find({ jobId: job._id, kind: 'final' }).sort('idx'); if (!bs || !bs.length) return r.status(404).json({ error: 'none' }); r.set('content-type', 'video/mp4').send(bs.length > 1 ? Buffer.concat(bs.map(b => b.data)) : bs[0].data); }));
 app.get('/api/videos/:id/file', auth, wrap(async (q, r) => {
   const job = await VideoJob.findOne({ _id: q.params.id, userId: q.user._id }); if (!job || job.status !== 'done') throw bad('Not ready.', 404);
+  if (job.fileDeletedAt) throw bad('You downloaded this video and its file was removed to save space. Its prompt is saved - ask in chat to make it again.', 410);
   const bs = await VideoBlob.find({ jobId: job._id, kind: 'final' }).sort('idx'); if (!bs || !bs.length) throw bad('File missing.', 404);
-  const data = bs.length > 1 ? Buffer.concat(bs.map(b => b.data)) : bs[0].data;
+  const parts = []; for (const b of bs) { const d = await blobBytes(b); if (!d) throw bad('File missing.', 404); parts.push(d); }
+  const data = parts.length > 1 ? Buffer.concat(parts) : parts[0];
+  if (q.query.dl === '1') r.on('finish', () => removeJobFiles(job._id).catch(e => console.error('dl-clean', e.message)));
   r.set({ 'content-type': 'video/mp4', 'content-length': data.length, 'cache-control': 'private, max-age=3600' }).send(data);
 }));
-app.delete('/api/videos/:id', auth, wrap(async (q, r) => { const job = await VideoJob.findOneAndDelete({ _id: q.params.id, userId: q.user._id }); if (job) await VideoBlob.deleteMany({ jobId: job._id }); r.json({ ok: true }); }));
+app.delete('/api/videos/:id', auth, wrap(async (q, r) => { const job = await VideoJob.findOneAndDelete({ _id: q.params.id, userId: q.user._id }); if (job) await removeJobFiles(job._id); r.json({ ok: true }); }));
 // end-to-end self-test of the Short pipeline with a system user (runs once per hour at most, no secrets in the answer)
 const SELFTEST = new mongoose.Types.ObjectId('000000000000000000000001');
 app.get('/api/health/pipeline', wrap(async (q, r) => {
@@ -372,6 +380,7 @@ app.get('/api/health/pipeline', wrap(async (q, r) => {
   const openJobs = await VideoJob.find({ status: { $nin: ['done', 'failed'] } }).sort('createdAt').select('status stage createdAt lockUntil userId topic title scenes.state').lean();
   r.json({ ...publicJob(job), final: job.status === 'done' ? (await VideoBlob.findOne({ jobId: job._id, kind: 'final' }).select('_id').lean()) ? 'stored' : 'missing' : null, queue: { open: openJobs.length, jobs: openJobs.slice(0, 6).map(j => ({ id: String(j._id), status: j.status, stage: j.stage, topic: (j.topic || '').slice(0, 60), title: j.title || '', ok: (j.scenes || []).filter(x => x.state === 'ok').length, ageMin: Math.round((Date.now() - new Date(j.createdAt)) / 60000) })) } });
 }));
+app.get('/api/health/media-sweep', wrap(async (q, r) => { r.json(await sweepBlobs(Math.min(200, Math.max(1, Number(q.query.limit) || 40)))); }));
 app.get('/api/health/agnes', wrap(async (q, r) => {
   const key = process.env.AGNES_API_KEY; if (!key) return r.json({ configured: false });
   const H = { authorization: `Bearer ${key}`, 'content-type': 'application/json' }; const out = { configured: true };
