@@ -397,7 +397,15 @@ app.get('/api/health/pipeline/clips', wrap(async (q, r) => {
   r.set({ 'content-type': 'video/mp4', 'content-length': b.data.length }).send(b.data);
 }));
 app.get('/api/health/pipeline/script', wrap(async (q, r) => { const job = await VideoJob.findOne({ userId: SELFTEST }).sort('-createdAt'); r.json(job ? { topic: job.topic, title: job.title, long: job.long, status: job.status, stage: job.stage, scenes: job.scenes.map(x => ({ act: x.act, kw: x.kw, state: x.state, say: x.say })) } : {}); }));
-app.get('/api/health/pipeline/file', wrap(async (q, r) => { const job = await VideoJob.findOne({ userId: SELFTEST, status: 'done' }).sort('-createdAt'); const bs = job && await VideoBlob.find({ jobId: job._id, kind: 'final' }).sort('idx'); if (!bs || !bs.length) throw bad('No self-test video yet.', 404); const data = bs.length > 1 ? Buffer.concat(bs.map(b => b.data)) : bs[0].data; r.set({ 'content-type': 'video/mp4', 'content-length': data.length }).send(data); }));
+app.get('/api/health/pipeline/file', wrap(async (q, r) => {
+  const job = q.query.job ? await VideoJob.findById(String(q.query.job)) : await VideoJob.findOne({ userId: SELFTEST, status: 'done' }).sort('-createdAt');
+  if (!job) throw bad('No job.', 404);
+  const bs = await VideoBlob.find({ jobId: job._id, kind: 'final' }).sort('idx');
+  if (!bs || !bs.length) throw bad('No video file yet.', 404);
+  const parts = []; for (const b of bs) { const d = await blobBytes(b); if (!d || !d.length) throw bad('Video bytes missing.', 404); parts.push(d); }
+  const data = parts.length > 1 ? Buffer.concat(parts) : parts[0];
+  r.set({ 'content-type': 'video/mp4', 'content-length': data.length }).send(data);
+}));
 let vidHealth = { at: 0 };
 app.get('/api/health/video', wrap(async (q, r) => {
   if (!imageEnabled()) return r.json({ ok: false, configured: false });
