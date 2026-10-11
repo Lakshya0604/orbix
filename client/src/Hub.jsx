@@ -77,9 +77,9 @@ export default function Hub({ user, dark, setDark, logout }) {
   useEffect(() => { loadVids(); }, [loadVids]);
   useEffect(() => { if (!activeVid) return; const t = setInterval(loadVids, 4000); return () => clearInterval(t); }, [activeVid, loadVids]);
   const makeVid = async e => { e.preventDefault(); setVErr(''); try { await api('/api/videos', { method: 'POST', body: { topic: vTopic, long: vLong, char: vChar } }); setVTopic(''); loadVids(); } catch (x) { setVErr(x.message); } };
-  const fetchVid = async id => { const r = await fetch(`/api/videos/${id}/file`, { headers: { authorization: `Bearer ${token()}` } }); if (!r.ok) throw new Error('Could not load the video.'); return URL.createObjectURL(await r.blob()); };
+  const fetchVid = async (id, dl) => { const r = await fetch(`/api/videos/${id}/file${dl ? '?dl=1' : ''}`, { headers: { authorization: `Bearer ${token()}` } }); if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Could not load the video.'); } return URL.createObjectURL(await r.blob()); };
   const playVid = async id => { try { setVPlay({ id, url: await fetchVid(id) }); } catch (x) { setVErr(x.message); } };
-  const saveVid = async (id, name) => { try { const u = await fetchVid(id); const a = document.createElement('a'); a.href = u; a.download = `${(name || 'orbix-short').replace(/[^\w]+/g, '-').slice(0, 40)}.mp4`; a.click(); } catch (x) { setVErr(x.message); } };
+  const saveVid = async (id, name) => { try { const u = await fetchVid(id, true); const a = document.createElement('a'); a.href = u; a.download = `${(name || 'orbix-short').replace(/[^\w]+/g, '-').slice(0, 40)}.mp4`; a.click(); setTimeout(() => { URL.revokeObjectURL(u); loadVids(); }, 3000); } catch (x) { setVErr(x.message); } };
   const removeVid = async id => { await api(`/api/videos/${id}`, { method: 'DELETE' }); if (vPlay?.id === id) setVPlay(null); loadVids(); };
   const [hfModel, setHfModel] = useState(''); const [hfInfo, setHfInfo] = useState(null); const [hfIn, setHfIn] = useState(''); const [hfOut, setHfOut] = useState(null); const [hfBusy, setHfBusy] = useState(''); const [hfErr, setHfErr] = useState(''); const [spEp, setSpEp] = useState(0); const [spVals, setSpVals] = useState({});
   const hfInspect = async e => { e?.preventDefault(); setHfErr(''); setHfOut(null); setHfInfo(null); setHfBusy('inspect'); try { const inf = await api('/api/hf/inspect', { method: 'POST', body: { model: hfModel } }); setSpEp(Math.max(0, (inf.endpoints || []).findIndex(e => !e.blocked))); setSpVals({}); setHfInfo(inf); } catch (x) { setHfErr(x.message); } setHfBusy(''); };
@@ -237,7 +237,8 @@ export default function Hub({ user, dark, setDark, logout }) {
               <div className="vid-top"><b>{j.title || j.topic}</b><span className={`vid-st st-${j.status}`}>{{ queued: 'Waiting', scripting: 'Writing script', clips: `Clips ${j.scenes.filter(x => x === 'ok').length}/${j.scenes.length || '?'}`, stitching: 'Stitching', done: 'Ready', failed: 'Failed' }[j.status]}</span></div>
               {!['done', 'failed'].includes(j.status) && <><div className="vid-bar"><i style={{ width: `${Math.max(3, j.pct || 0)}%` }} /></div><p className="hint">{j.stage || 'Working'} · {j.pct || 0}%{j.etaSec ? ` · about ${Math.max(1, Math.round(j.etaSec / 60))} min left` : ''}</p></>}
               {j.error && <p className="hint">{j.error}</p>}{j.note && j.status === 'done' && <p className="hint">{j.note}</p>}
-              {j.status === 'done' && <div className="vid-act"><button className="btn ghost sm" onClick={() => playVid(j.id)}>Play</button><button className="btn primary sm" onClick={() => saveVid(j.id, j.title)}>Download</button><button className="x" onClick={() => removeVid(j.id)} aria-label="Delete video">×</button></div>}
+              {j.status === 'done' && !j.fileDeleted && <div className="vid-act"><button className="btn ghost sm" onClick={() => playVid(j.id)}>Play</button><button className="btn primary sm" onClick={() => saveVid(j.id, j.title)}>Download</button><button className="x" onClick={() => removeVid(j.id)} aria-label="Delete video">×</button></div>}
+              {j.status === 'done' && j.fileDeleted && <p className="hint">Downloaded and its file was removed to save space. Its settings are saved - ask in chat to make it again.</p>}
               {j.status === 'failed' && <div className="vid-act"><button className="x" onClick={() => removeVid(j.id)} aria-label="Delete">×</button></div>}
               {vPlay?.id === j.id && <video src={vPlay.url} controls playsInline className="vid-player" />}
             </div>)}
@@ -332,4 +333,4 @@ export default function Hub({ user, dark, setDark, logout }) {
       <AnimatePresence>{toast && <motion.div className="toast" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
     </div>
   );
-      }
+                                                        }
