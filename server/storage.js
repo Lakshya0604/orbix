@@ -10,7 +10,7 @@ async function repo() {
   if (!w.ok) throw new Error(`HF whoami failed (HTTP ${w.status}).`);
   const me = await w.json();
   const name = (process.env.HF_MEDIA_REPO || 'orbix-media').replace(/[^\w.-]/g, '-').slice(0, 90);
-  const cr = await fetch(`${API}/api/datasets`, { method: 'POST', headers: { ...H(), 'content-type': 'application/json' }, body: JSON.stringify({ name, private: true }), signal: AbortSignal.timeout(15000) });
+  const cr = await fetch(`${API}/api/repos/create`, { method: 'POST', headers: { ...H(), 'content-type': 'application/json' }, body: JSON.stringify({ name, type: 'dataset', private: true }), signal: AbortSignal.timeout(15000) });
   if (!cr.ok && cr.status !== 409) throw new Error(`HF dataset create failed (HTTP ${cr.status}): ${(await cr.text()).slice(0, 120)}`);
   repoId = `${me.name}/${name}`;
   return repoId;
