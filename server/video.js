@@ -35,7 +35,7 @@ const sanitizeKw = (kw, subject, shot) => {
 export const VideoJob = model('VideoJob', new Schema({
   userId: { type: Schema.Types.ObjectId, index: true }, topic: String, title: { type: String, default: '' },
   status: { type: String, default: 'queued', index: true }, // queued, scripting, clips, stitching, done, failed
-  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, manhwa: { type: Boolean, default: false }, panels: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, locDesc: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, landscape: { type: Boolean, default: false }, startedAt: Date, fileDeletedAt: Date,
+  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, manhwa: { type: Boolean, default: false }, panels: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, locDesc: { type: String, default: '' }, panelStats: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, landscape: { type: Boolean, default: false }, startedAt: Date, fileDeletedAt: Date,
   lockUntil: { type: Date, default: null }, bytes: { type: Number, default: 0 }, voiceVia: { type: String, default: '' },
 }, { timestamps: true }));
 export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer, gen: { type: Boolean, default: false } }, { timestamps: true }));
@@ -207,7 +207,7 @@ async function stitch(job) {
     const outD = path.join(dir, 'outd.mp4');
     try {
       await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', out, '-f', 'lavfi', '-i', 'sine=frequency=55', '-f', 'lavfi', '-i', 'anoisesrc=color=brown:amplitude=0.7', '-filter_complex', '[1:a]volume=0.15[s];[2:a]lowpass=f=200,volume=0.35[n];[0:a][s][n]amix=inputs=3:duration=first:dropout_transition=0,alimiter=limit=0.95[a]', '-map', '0:v', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outD], { timeout: 180000 });
-      await fs.rename(outD, out); job.note = `${job.note ? job.note + ' · ' : ''}horror atmosphere`;
+      await fs.rename(outD, out); job.note = `${job.note ? job.note + ' · ' : ''}horror atmosphere`; if (job.panelStats) job.note = `panels via ${job.panelStats} (K=Kontext fixed character, G=Gemini, F=free FLUX) · ` + job.note;
     } catch { }
     let data = await fs.readFile(out);
     if (data.length > (job.scenesWanted ? 150e6 : 15.5e6)) throw new Error('This video is too long to save on the free plan yet. Try a shorter story.');
@@ -369,13 +369,13 @@ async function panelsClip(job, i) {
   let ref = await VideoBlob.findOne({ jobId: job._id, kind: 'panelref' });
   if (!ref && job.charDesc) {
     await stage(job, 'Drawing the main character');
-    const rp = `${job.charDesc}, full body, standing, plain simple background, ${PANEL_STYLE}.`;
+    const rp = `${job.charDesc}, full body, standing, plain light grey background, even soft lighting, face hair and clothes clearly visible, character reference sheet, clean anime style, no text, no watermark.`;
     for (let a = 0; a < 2 && !ref; a++) { try { const url = await generateImage({ prompt: rp, width: 768, height: 1024 }); ref = await VideoBlob.create({ jobId: job._id, kind: 'panelref', idx: 0, data: await get(url) }); } catch (e) { console.error('panelref', String(e.message).slice(0, 100)); await new Promise(r => setTimeout(r, 3000)); } }
   }
   if (ref) {
     for (let a = 0; a < 2 && !img; a++) {
       try {
-        const url = await generateWithReference({ image: await blobBytes(ref), prompt: `The same character with the same face, hair and clothes. ${String(job.scenes[i].prompt).slice(0, 380)}. ${job.locDesc ? 'Setting: ' + job.locDesc + '. ' : ''}${PANEL_STYLE}, ${job.landscape ? 'wide cinematic 16:9 frame' : 'tall 9:16 frame'}.` });
+        const url = await generateWithReference({ image: await blobBytes(ref), prompt: `The same character, exact same face, hair, outfit and colors: ${job.charDesc}. ${String(job.scenes[i].prompt).slice(0, 380)}. ${job.locDesc ? 'Setting: ' + job.locDesc + '. ' : ''}${PANEL_STYLE}, ${job.landscape ? 'wide cinematic 16:9 frame' : 'tall 9:16 frame'}.` });
         img = await get(url); panelVia = 'FLUX Kontext (fixed character)';
       } catch (e) { console.error('kontext panel', String(e.message).slice(0, 100)); await new Promise(r => setTimeout(r, 3000)); }
     }
@@ -386,7 +386,9 @@ async function panelsClip(job, i) {
   if (!img) { // free HF FLUX space - the daily workhorse (ZeroGPU quota)
     for (let a = 0; a < 2 && !img; a++) { try { const dm = DIMS(job); const url = await generateImage({ prompt, width: job.landscape ? 1024 : 768, height: job.landscape ? 576 : 1024 }); const r = await fetch(url, { signal: AbortSignal.timeout(60000) }); if (r.ok) { const b = Buffer.from(await r.arrayBuffer()); if (b.length > 5000) { img = b; panelVia = 'FLUX (free GPU)'; } } } catch (e) { console.error('flux panel', String(e.message).slice(0, 120)); await new Promise(r => setTimeout(r, 4000)); } }
   }
-  if (img) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'panel', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'panel', idx: i, data: img }); job.note = `Anime panels (${panelVia}${panelVia === 'Google AI Studio' ? `, ${used + 1}/${PANEL_CAP} today` : ''}) + AI narrator`; }
+  if (img) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'panel', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'panel', idx: i, data: img });
+    const tag = panelVia.startsWith('FLUX Kontext') ? 'K' : panelVia === 'Google AI Studio' ? 'G' : 'F'; job.panelStats = (job.panelStats || '') + tag;
+    job.note = `Anime panels (${panelVia}${panelVia === 'Google AI Studio' ? `, ${used + 1}/${PANEL_CAP} today` : ''}) + AI narrator`; }
   else if (used >= PANEL_CAP && !job.note) { job.note = `Daily free panel budget (${PANEL_CAP}) used - backup picture chain for the rest`; }
   return stillClip(job.scenes[i].prompt, i, img, dm, true);
 }
