@@ -73,10 +73,11 @@ export default function Hub({ user, dark, setDark, logout }) {
   const pickSong = e => { const f = e.target.files?.[0]; e.target.value = ''; if (!f) return; if (f.size > 15 * 1024 * 1024) { setVErr('Song file is over 15 MB. Try a shorter or smaller one.'); return; } setVErr(''); setVSongFile(f); };
   const makeLyric = async () => { if (!vSongFile) return; setVErr(''); try { const r = await fetch('/api/videos/lyric', { method: 'POST', headers: { 'content-type': 'application/octet-stream', authorization: 'Bearer ' + token(), 'x-title': encodeURIComponent((vSong || vSongFile.name.replace(/\.[^.]+$/, '')).slice(0, 120)) }, body: vSongFile }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Could not start the lyric video.'); setVSong(''); setVSongFile(null); loadVids(); } catch (x) { setVErr(x.message); } };
   const [vChar, setVChar] = useState(false);
+  const [vPanels, setVPanels] = useState(false);
   const activeVid = vids.jobs.some(j => !['done', 'failed'].includes(j.status));
   useEffect(() => { loadVids(); }, [loadVids]);
   useEffect(() => { if (!activeVid) return; const t = setInterval(loadVids, 4000); return () => clearInterval(t); }, [activeVid, loadVids]);
-  const makeVid = async e => { e.preventDefault(); setVErr(''); try { await api('/api/videos', { method: 'POST', body: { topic: vTopic, long: vLong, char: vChar } }); setVTopic(''); loadVids(); } catch (x) { setVErr(x.message); } };
+  const makeVid = async e => { e.preventDefault(); setVErr(''); try { await api('/api/videos', { method: 'POST', body: { topic: vTopic, long: vLong, char: vChar && !vPanels, panels: vPanels } }); setVTopic(''); loadVids(); } catch (x) { setVErr(x.message); } };
   const fetchVid = async (id, dl) => { const r = await fetch(`/api/videos/${id}/file${dl ? '?dl=1' : ''}`, { headers: { authorization: `Bearer ${token()}` } }); if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Could not load the video.'); } return URL.createObjectURL(await r.blob()); };
   const playVid = async id => { try { setVPlay({ id, url: await fetchVid(id) }); } catch (x) { setVErr(x.message); } };
   const saveVid = async (id, name) => { try { const u = await fetchVid(id, true); const a = document.createElement('a'); a.href = u; a.download = `${(name || 'orbix-short').replace(/[^\w]+/g, '-').slice(0, 40)}.mp4`; a.click(); setTimeout(() => { URL.revokeObjectURL(u); loadVids(); }, 3000); } catch (x) { setVErr(x.message); } };
@@ -229,7 +230,8 @@ export default function Hub({ user, dark, setDark, logout }) {
             <p className="hint">Orbix writes a short script with a voiceover, makes 4 vertical AI clips (9:16) and stitches them with the voice. It runs in the background, so you can leave. Free limits: 1 at a time, 4 a day, about 16 seconds in total.</p>
             {vErr && <div className="msg err" role="alert">{vErr}</div>}
             <label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vLong} onChange={e => setVLong(e.target.checked)} disabled={!vids.enabled} /> Long story mode (about 2 minutes, a full story from start to end). Takes about 8 to 10 minutes to make.</label><label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vLong} onChange={e => setVLong(e.target.checked)} disabled={!vids.enabled} /> Long story mode (about 2 minutes, a full story from start to end). Takes about 8 to 10 minutes to make.</label>
-            <label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vChar} onChange={e => setVChar(e.target.checked)} disabled={!vids.enabled} /> Same animated character in every scene (AI pictures, uses the free daily GPU time, so about one short video a day)</label>
+                        <label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vPanels} onChange={e => setVPanels(e.target.checked)} disabled={!vids.enabled} /> Anime panels + AI narrator (new: cinematic anime panels, fast, shows time left)</label>
+<label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vChar} onChange={e => setVChar(e.target.checked)} disabled={!vids.enabled} /> Same animated character in every scene (AI pictures, uses the free daily GPU time, so about one short video a day)</label>
             <p className="hint" style={{ margin: '10px 0 4px' }}><b>Lyric video:</b> pick a song, Orbix writes the words on screen in sync and adds matching footage.</p>
             <div className="vid-form"><input value={vSong} onChange={e => setVSong(e.target.value)} placeholder="Song title (optional)" maxLength={120} disabled={!vids.enabled} /><button type="button" className="btn ghost sm" onClick={() => songRef.current?.click()} disabled={!vids.enabled || activeVid}>{vSongFile ? vSongFile.name.slice(0, 24) : 'Choose song'}</button><button type="button" className="btn primary sm" onClick={makeLyric} disabled={!vids.enabled || !vSongFile || activeVid}>Make lyric video</button></div>
             <input ref={songRef} type="file" hidden accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac,.aac" onChange={pickSong} />
@@ -333,4 +335,4 @@ export default function Hub({ user, dark, setDark, logout }) {
       <AnimatePresence>{toast && <motion.div className="toast" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
     </div>
   );
-                                                        }
+}
