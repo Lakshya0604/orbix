@@ -166,3 +166,26 @@ export async function transcribeSong(buf, language) {
   const t = await r.text(); if (!r.ok) throw new Error(`The lyrics service said HTTP ${r.status}: ${t.replace(/\s+/g, ' ').slice(0, 140)}`);
   const j = JSON.parse(t); return { language: j.language || '', segments: (j.segments || []).map(s => ({ t0: Number(s.start) || 0, t1: Number(s.end) || 0, text: String(s.text || '').trim() })).filter(s => s.text) };
 }
+
+// Google AI Studio image generation ("Nano Banana"). Free tier is limited to a small daily number of images per key - video.js budgets it (PANEL_DAILY_CAP).
+export async function generateImageGemini({ prompt, aspect = '9:16' }) {
+  const key = process.env.GEMINI_API_KEY; if (!key) throw new Error('No Gemini key set.');
+  const text = String(prompt || '').trim().slice(0, 800); if (!text) throw new Error('No prompt given.');
+  const model = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { method: 'POST', headers: { 'x-goog-api-key': key, 'content-type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text }] }], generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: aspect } } }), signal: AbortSignal.timeout(90000) });
+  const t = await r.text(); if (!r.ok) throw new Error(`Gemini image HTTP ${r.status}: ${t.replace(/\s+/g, ' ').slice(0, 140)}`);
+  const parts = JSON.parse(t).candidates?.[0]?.content?.parts || [];
+  for (const p of parts) { const d = p.inlineData?.data || p.inline_data?.data; if (d) { const b = Buffer.from(d, 'base64'); if (b.length > 5000) return b; } }
+  throw new Error('Gemini returned no image.');
+}
+
+// ElevenLabs voiceover (free tier, owner's key). Falls back to the keyless chain in video.js when it fails.
+export async function generateSpeechEL({ text, voiceId }) {
+  const key = process.env.ELEVENLABS_API_KEY; if (!key) throw new Error('No ElevenLabs key set.');
+  const t = String(text || '').trim().slice(0, 900); if (!t) throw new Error('No narration text.');
+  const voice = voiceId || process.env.EL_VOICE_ID || 'JBFqnCBsd6RMkjVDRZzb';
+  const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}?output_format=mp3_44100_128`, { method: 'POST', headers: { 'xi-api-key': key, 'content-type': 'application/json' }, body: JSON.stringify({ text: t, model_id: process.env.EL_MODEL_ID || 'eleven_multilingual_v2', voice_settings: { stability: 0.5, similarity_boost: 0.75 } }), signal: AbortSignal.timeout(60000) });
+  if (!r.ok) throw new Error(`ElevenLabs HTTP ${r.status}: ${(await r.text()).replace(/\s+/g, ' ').slice(0, 120)}`);
+  const data = Buffer.from(await r.arrayBuffer()); if (data.length < 500) throw new Error('ElevenLabs returned no audio.');
+  return { data, via: 'elevenlabs' };
+}
