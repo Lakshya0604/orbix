@@ -387,8 +387,8 @@ async function makeScene(job, i) {
   const useChar = !job.lyric && !job.panels;
   if (job.panels) { await stage(job, `${tag}: drawing panel`); data = await panelsClip(job, i); }
   if (useChar) { data = await charClip(job, i); job.note = job.manhwa ? 'AI manhwa panels with one fixed character (FLUX Kontext), slow scroll, voiceover' : 'AI animated frames with one fixed character (FLUX Kontext), cinematic motion'; }
-  if (!useChar && job.mode === 'ai' && Date.now() - gpuDownAt < 1800000 && fallbackMode() !== 'still') { job.mode = fallbackMode(); job.note = NOTE[job.mode]; await job.save(); }
-  if (!useChar && (job.mode === 'ai' || !job.mode)) {
+  if (!useChar && !job.panels && job.mode === 'ai' && Date.now() - gpuDownAt < 1800000 && fallbackMode() !== 'still') { job.mode = fallbackMode(); job.note = NOTE[job.mode]; await job.save(); }
+  if (!useChar && !job.panels && (job.mode === 'ai' || !job.mode)) {
     try {
       await stage(job, `${tag}: AI video`);
       const dm0 = DIMS(job); const url = await generateClip({ prompt: job.scenes[i].prompt, seconds: 4, width: job.landscape ? 768 : dm0.W, height: job.landscape ? 416 : dm0.H, waitMs: 80000 });
@@ -402,7 +402,7 @@ async function makeScene(job, i) {
       job.mode = fallbackMode(); job.note = NOTE[job.mode]; await job.save();
     }
   }
-  if (!useChar && job.mode === 'agnes') {
+  if (!useChar && !job.panels && job.mode === 'agnes') {
     try {
       const wait = agnesAt + 62000 - Date.now(); if (wait > 0) await new Promise(x => setTimeout(x, wait));
       agnesAt = Date.now(); const t0 = Date.now(); const out = await generateAgnesClip({ prompt: job.scenes[i].prompt });
@@ -414,8 +414,8 @@ async function makeScene(job, i) {
       data = await stockClip(job, i); job.note = `${NOTE.agnes} + Pixabay stock for some scenes (${e.message.slice(0, 60)})`;
     }
   }
-  if (!useChar && job.mode === 'stock') { await stage(job, `${tag}: finding footage`); data = await stockClip(job, i); job.note = NOTE.stock; }
-  if (!useChar && job.mode === 'still') data = await stillClip(job.scenes[i].prompt, i, null, DIMS(job));
+  if (!useChar && !job.panels && job.mode === 'stock') { await stage(job, `${tag}: finding footage`); data = await stockClip(job, i); job.note = NOTE.stock; }
+  if (!useChar && !job.panels && job.mode === 'still') data = await stillClip(job.scenes[i].prompt, i, null, DIMS(job));
   await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'clip', idx: i, data, gen: useChar });
   if (job.scenes[i].say && !job.lyric) {
     await stage(job, `${tag}: voiceover`);
