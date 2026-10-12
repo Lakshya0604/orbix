@@ -480,7 +480,7 @@ export const startWorker = () => { setInterval(tick, 4000).unref?.(); setInterva
 const progress = j => {
   const n = (j.scenes || []).length, done = (j.scenes || []).filter(s => s.state !== 'wait').length;
   const pct = { queued: 3, scripting: 8, clips: Math.round(12 + 76 * done / Math.max(1, n)), stitching: 92, done: 100, failed: 0 }[j.status] ?? 0;
-  const perScene = j.panels ? 15 : 30;
+  const perScene = j.panels ? 45 : 30;
   const left = j.status === 'clips' ? (n - done) * perScene + 60 : j.status === 'stitching' ? 60 : j.status === 'scripting' ? 90 + (n || (j.long ? 14 : 4)) * 30 : 0;
   return { pct, etaSec: ['done', 'failed'].includes(j.status) ? 0 : left };
 };
