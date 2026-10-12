@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 import { chatCompletion } from './llm.js';
-import { generateClip, generateSpeech, generateAgnesClip, generateImage, generateImageCF, generateWithReference, generateInbetweens, transcribeSong } from './media.js';
+import { generateClip, generateSpeech, generateSpeechEL, generateAgnesClip, generateImage, generateImageCF, generateImageGemini, generateWithReference, generateInbetweens, transcribeSong } from './media.js';
 const { Schema, model } = mongoose; const run = promisify(execFile);
 
 // Banned visual subjects: never query them and never ship them, whatever the niche.
@@ -35,7 +35,7 @@ const sanitizeKw = (kw, subject, shot) => {
 export const VideoJob = model('VideoJob', new Schema({
   userId: { type: Schema.Types.ObjectId, index: true }, topic: String, title: { type: String, default: '' },
   status: { type: String, default: 'queued', index: true }, // queued, scripting, clips, stitching, done, failed
-  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, manhwa: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, landscape: { type: Boolean, default: false }, startedAt: Date, fileDeletedAt: Date,
+  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, manhwa: { type: Boolean, default: false }, panels: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, landscape: { type: Boolean, default: false }, startedAt: Date, fileDeletedAt: Date,
   lockUntil: { type: Date, default: null }, bytes: { type: Number, default: 0 }, voiceVia: { type: String, default: '' },
 }, { timestamps: true }));
 export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer, gen: { type: Boolean, default: false } }, { timestamps: true }));
@@ -78,7 +78,7 @@ export async function sweepBlobs(limit = 40) {
 
 
 export const MAX_ACTIVE = 1, MAX_PER_DAY = 4, SCENES = 4, LONG_SCENES = 14;
-export async function startJob(userId, topic, long = false, char = false, scenesWanted = 0, sys = false, landscape = false, manhwa = false) {
+export async function startJob(userId, topic, long = false, char = false, scenesWanted = 0, sys = false, landscape = false, manhwa = false, panels = false) {
   const t = String(topic || '').trim().slice(0, 200);
   if (t.length < 3) throw Object.assign(new Error('Tell me what the video is about.'), { status: 400 });
   await VideoJob.updateMany({ userId, status: { $nin: ['done', 'failed', 'queued'] }, updatedAt: { $lt: new Date(Date.now() - 2 * 3600000) }, stage: { $not: /quota/i } }, { status: 'failed', error: 'This one got stuck (the server restarted). Please start it again.' });
@@ -86,7 +86,7 @@ export async function startJob(userId, topic, long = false, char = false, scenes
   if (await VideoJob.countDocuments({ userId, status: { $nin: ['done', 'failed'] } }) >= MAX_ACTIVE) throw Object.assign(new Error('One video is already being made. Wait for it to finish.'), { status: 429 });
   if (await VideoJob.countDocuments({ userId, createdAt: { $gt: new Date(Date.now() - 86400000) } }) >= MAX_PER_DAY) throw Object.assign(new Error(`Free limit: ${MAX_PER_DAY} videos per day.`), { status: 429 });
   }
-  return VideoJob.create({ userId, topic: t, long: !!long, char: !!char, scenesWanted: Math.min(160, Math.max(0, Math.round(scenesWanted) || 0)), landscape: !!landscape, manhwa: !!manhwa, startedAt: new Date() });
+  return VideoJob.create({ userId, topic: t, long: !!long, char: !!char, scenesWanted: Math.min(160, Math.max(0, Math.round(scenesWanted) || 0)), landscape: !!landscape, manhwa: !!manhwa, panels: !!panels, startedAt: new Date() });
 }
 
 export async function startLyricJob(userId, title, buf) {
@@ -354,6 +354,21 @@ async function charClip(job, i) {
   if (imgB) { try { job.note = 'AI animated frames, one fixed character (FLUX Kontext), keyframe morph motion'; return await morphClip(img, imgB, i, DIMS(job)); } catch (e) { console.error('morph', String(e.message).slice(0, 80)); } }
   return stillClip(job.scenes[i].prompt, i, img, DIMS(job), true);
 }
+// TK-style panels mode: one anime panel per scene (Google AI Studio first, budgeted; free backup chain after the daily cap), Ken Burns motion, ElevenLabs narrator voice.
+const PANEL_STYLE = 'dark cinematic anime illustration, film still, moody single-source lighting, film grain, rich color, no text, no watermark';
+const PANEL_CAP = Math.max(1, Number(process.env.PANEL_DAILY_CAP || 50));
+const panelsToday = async () => { const d = new Date(); d.setHours(0, 0, 0, 0); return VideoBlob.countDocuments({ kind: 'panel', createdAt: { $gte: d } }); };
+async function panelsClip(job, i) {
+  const dm = DIMS(job);
+  const prompt = `${job.charDesc ? job.charDesc + '. ' : ''}${String(job.scenes[i].prompt).slice(0, 380)}. ${PANEL_STYLE}, ${job.landscape ? 'wide cinematic 16:9 frame' : 'tall 9:16 frame'}.`;
+  let img = null;
+  const used = await panelsToday();
+  if (process.env.GEMINI_API_KEY && used < PANEL_CAP) {
+    for (let a = 0; a < 2 && !img; a++) { try { img = await generateImageGemini({ prompt, aspect: job.landscape ? '16:9' : '9:16' }); } catch (e) { console.error('gemini panel', String(e.message).slice(0, 120)); await new Promise(r => setTimeout(r, 4000)); } }
+    if (img) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'panel', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'panel', idx: i, data: img }); job.note = `Anime panels (Google AI Studio, ${used + 1}/${PANEL_CAP} today) + AI narrator`; }
+  } else if (used >= PANEL_CAP && !job.note) { job.note = `Daily free panel budget (${PANEL_CAP}) used - backup picture chain for the rest`; }
+  return stillClip(job.scenes[i].prompt, i, img, dm, true);
+}
 const NOTE = { agnes: 'Free AI-video GPU was used up today, so this one uses Agnes AI video', stock: 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)', still: 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion' };
 let agnesOffUntil = 0;
 const fallbackMode = () => process.env.AGNES_API_KEY && Date.now() > agnesOffUntil ? 'agnes' : process.env.PIXABAY_KEY ? 'stock' : 'still';
@@ -365,7 +380,8 @@ const stage = async (job, t) => { job.stage = t; await job.save().catch(() => {}
 async function makeScene(job, i) {
   const tag = `Clip ${i + 1} of ${job.scenes.length}`;
   let data;
-  const useChar = !job.lyric;
+  const useChar = !job.lyric && !job.panels;
+  if (job.panels) { await stage(job, `${tag}: drawing panel`); data = await panelsClip(job, i); }
   if (useChar) { data = await charClip(job, i); job.note = job.manhwa ? 'AI manhwa panels with one fixed character (FLUX Kontext), slow scroll, voiceover' : 'AI animated frames with one fixed character (FLUX Kontext), cinematic motion'; }
   if (!useChar && job.mode === 'ai' && Date.now() - gpuDownAt < 1800000 && fallbackMode() !== 'still') { job.mode = fallbackMode(); job.note = NOTE[job.mode]; await job.save(); }
   if (!useChar && (job.mode === 'ai' || !job.mode)) {
@@ -399,7 +415,11 @@ async function makeScene(job, i) {
   await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'clip', idx: i, data, gen: useChar });
   if (job.scenes[i].say && !job.lyric) {
     await stage(job, `${tag}: voiceover`);
-    try { const au = await generateSpeech({ text: job.scenes[i].say, hindi: /[\u0900-\u097F]/.test(job.scenes[i].say) }); if (au?.data?.length > 200) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'audio', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'audio', idx: i, data: au.data }); if (!job.voiceVia) job.voiceVia = au.via; if (au.via !== job.voiceVia) job.voiceVia = 'mixed'; } } catch (e) { console.error('voice', e.message.slice(0, 120)); }
+    let doneVoice = false;
+    if (job.panels && process.env.ELEVENLABS_API_KEY) {
+      try { const au = await generateSpeechEL({ text: job.scenes[i].say }); if (au?.data?.length > 200) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'audio', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'audio', idx: i, data: au.data }); job.voiceVia = 'elevenlabs'; doneVoice = true; } } catch (e) { console.error('el voice', String(e.message).slice(0, 120)); }
+    }
+    if (!doneVoice) try { const au = await generateSpeech({ text: job.scenes[i].say, hindi: /[\u0900-\u097F]/.test(job.scenes[i].say) }); if (au?.data?.length > 200) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'audio', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'audio', idx: i, data: au.data }); if (!job.voiceVia) job.voiceVia = au.via; if (au.via !== job.voiceVia) job.voiceVia = 'mixed'; } } catch (e) { console.error('voice', e.message.slice(0, 120)); }
   }
   job.scenes[i].state = 'ok'; await job.save();
 }
@@ -407,7 +427,7 @@ async function step(job) {
   if (job.lyric && (job.status === 'queued' || job.status === 'scripting')) { job.status = 'scripting'; await job.save(); return lyricScript(job); }
   if (job.status === 'queued' || job.status === 'scripting') { job.status = 'scripting'; job.stage = job.long ? 'Planning the story' : 'Writing the script'; await job.save(); return script(job); }
   if (job.status === 'clips') {
-    if (!job.lyric) { const legacy = await VideoBlob.findOne({ jobId: job._id, kind: 'clip', gen: { $ne: true } }).select('_id').lean(); if (legacy) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip' }); job.scenes.forEach(s => { s.state = 'wait'; s.tries = 0; }); job.note = 'Re-making every scene as AI-generated animation (no stock footage)'; await job.save(); } }
+    if (!job.lyric && !job.panels) { const legacy = await VideoBlob.findOne({ jobId: job._id, kind: 'clip', gen: { $ne: true } }).select('_id').lean(); if (legacy) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip' }); job.scenes.forEach(s => { s.state = 'wait'; s.tries = 0; }); job.note = 'Re-making every scene as AI-generated animation (no stock footage)'; await job.save(); } }
     const i = job.scenes.findIndex(s => s.state === 'wait');
     if (i < 0) { const ok = job.scenes.filter(s => s.state === 'ok').length; if (ok < 2) throw new Error('Not enough clips could be made. Please try again.'); job.status = 'stitching'; job.stage = 'Joining clips with the voice'; return job.save(); }
     try { await withTimeout(makeScene(job, i), 170000, `Clip ${i + 1}`); }
@@ -437,7 +457,8 @@ export const startWorker = () => { setInterval(tick, 4000).unref?.(); setInterva
 const progress = j => {
   const n = (j.scenes || []).length, done = (j.scenes || []).filter(s => s.state !== 'wait').length;
   const pct = { queued: 3, scripting: 8, clips: Math.round(12 + 76 * done / Math.max(1, n)), stitching: 92, done: 100, failed: 0 }[j.status] ?? 0;
-  const left = j.status === 'clips' ? (n - done) * 30 + 60 : j.status === 'stitching' ? 60 : j.status === 'scripting' ? 90 + (n || (j.long ? 14 : 4)) * 30 : 0;
+  const perScene = j.panels ? 15 : 30;
+  const left = j.status === 'clips' ? (n - done) * perScene + 60 : j.status === 'stitching' ? 60 : j.status === 'scripting' ? 90 + (n || (j.long ? 14 : 4)) * 30 : 0;
   return { pct, etaSec: ['done', 'failed'].includes(j.status) ? 0 : left };
 };
-export const publicJob = j => ({ ...progress(j), long: !!j.long, stage: j.stage || '', id: String(j._id), topic: j.topic, title: j.title, status: j.status, scenes: (j.scenes || []).map(s => s.state), error: j.error || null, note: j.note || null, bytes: j.bytes, at: j.createdAt, fileDeleted: !!j.fileDeletedAt });
+export const publicJob = j => ({ ...progress(j), long: !!j.long, panels: !!j.panels, stage: j.stage || '', id: String(j._id), topic: j.topic, title: j.title, status: j.status, scenes: (j.scenes || []).map(s => s.state), error: j.error || null, note: j.note || null, bytes: j.bytes, at: j.createdAt, fileDeleted: !!j.fileDeletedAt });
