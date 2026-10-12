@@ -361,12 +361,16 @@ const panelsToday = async () => { const d = new Date(); d.setHours(0, 0, 0, 0); 
 async function panelsClip(job, i) {
   const dm = DIMS(job);
   const prompt = `${job.charDesc ? job.charDesc + '. ' : ''}${String(job.scenes[i].prompt).slice(0, 380)}. ${PANEL_STYLE}, ${job.landscape ? 'wide cinematic 16:9 frame' : 'tall 9:16 frame'}.`;
-  let img = null;
+  let img = null, panelVia = '';
   const used = await panelsToday();
   if (process.env.GEMINI_API_KEY && used < PANEL_CAP) {
-    for (let a = 0; a < 2 && !img; a++) { try { img = await generateImageGemini({ prompt, aspect: job.landscape ? '16:9' : '9:16' }); } catch (e) { console.error('gemini panel', String(e.message).slice(0, 120)); await new Promise(r => setTimeout(r, 4000)); } }
-    if (img) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'panel', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'panel', idx: i, data: img }); job.note = `Anime panels (Google AI Studio, ${used + 1}/${PANEL_CAP} today) + AI narrator`; }
-  } else if (used >= PANEL_CAP && !job.note) { job.note = `Daily free panel budget (${PANEL_CAP}) used - backup picture chain for the rest`; }
+    for (let a = 0; a < 2 && !img; a++) { try { img = await generateImageGemini({ prompt, aspect: job.landscape ? '16:9' : '9:16' }); panelVia = 'Google AI Studio'; } catch (e) { console.error('gemini panel', String(e.message).slice(0, 120)); await new Promise(r => setTimeout(r, 3000)); } }
+  }
+  if (!img) { // free HF FLUX space - the daily workhorse (ZeroGPU quota)
+    for (let a = 0; a < 2 && !img; a++) { try { const dm = DIMS(job); const url = await generateImage({ prompt, width: job.landscape ? 1024 : 768, height: job.landscape ? 576 : 1024 }); const r = await fetch(url, { signal: AbortSignal.timeout(60000) }); if (r.ok) { const b = Buffer.from(await r.arrayBuffer()); if (b.length > 5000) { img = b; panelVia = 'FLUX (free GPU)'; } } } catch (e) { console.error('flux panel', String(e.message).slice(0, 120)); await new Promise(r => setTimeout(r, 4000)); } }
+  }
+  if (img) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'panel', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'panel', idx: i, data: img }); job.note = `Anime panels (${panelVia}${panelVia === 'Google AI Studio' ? `, ${used + 1}/${PANEL_CAP} today` : ''}) + AI narrator`; }
+  else if (used >= PANEL_CAP && !job.note) { job.note = `Daily free panel budget (${PANEL_CAP}) used - backup picture chain for the rest`; }
   return stillClip(job.scenes[i].prompt, i, img, dm, true);
 }
 const NOTE = { agnes: 'Free AI-video GPU was used up today, so this one uses Agnes AI video', stock: 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)', still: 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion' };
