@@ -367,12 +367,13 @@ async function panelsClip(job, i) {
   const used = await panelsToday();
   // Character consistency: one reference picture per job, every scene edited from it (FLUX Kontext, free ZeroGPU). Text-only prompts drift per panel.
   let ref = await VideoBlob.findOne({ jobId: job._id, kind: 'panelref' });
+  console.log('[panels-v3]', String(job._id), 'scene', i, 'panelref:', ref ? 'yes' : 'none', 'charDesc:', job.charDesc ? 'yes' : 'no');
   if (!ref && job.charDesc) {
     await stage(job, 'Drawing the main character');
     const rp = `${job.charDesc}, full body, standing, plain light grey background, even soft lighting, face hair and clothes clearly visible, character reference sheet, clean anime style, no text, no watermark.`;
     for (let a = 0; a < 2 && !ref; a++) { try { const url = await generateImage({ prompt: rp, width: 768, height: 1024 }); ref = await VideoBlob.create({ jobId: job._id, kind: 'panelref', idx: 0, data: await get(url) }); } catch (e) { console.error('panelref', String(e.message).slice(0, 100)); await new Promise(r => setTimeout(r, 3000)); } }
   }
-  if (ref) {
+  if (ref) { console.log('[panels-v3]', String(job._id), 'scene', i, 'ref bytes:', (ref.data && ref.data.length) || 0, '- trying Kontext');
     for (let a = 0; a < 2 && !img; a++) {
       try {
         const url = await generateWithReference({ image: await blobBytes(ref), prompt: `The same character, exact same face, hair, outfit and colors: ${job.charDesc}. ${String(job.scenes[i].prompt).slice(0, 380)}. ${job.locDesc ? 'Setting: ' + job.locDesc + '. ' : ''}${PANEL_STYLE}, ${job.landscape ? 'wide cinematic 16:9 frame' : 'tall 9:16 frame'}.` });
@@ -387,9 +388,11 @@ async function panelsClip(job, i) {
     for (let a = 0; a < 2 && !img; a++) { try { const dm = DIMS(job); const url = await generateImage({ prompt, width: job.landscape ? 1024 : 768, height: job.landscape ? 576 : 1024 }); const r = await fetch(url, { signal: AbortSignal.timeout(60000) }); if (r.ok) { const b = Buffer.from(await r.arrayBuffer()); if (b.length > 5000) { img = b; panelVia = 'FLUX (free GPU)'; } } } catch (e) { console.error('flux panel', String(e.message).slice(0, 120)); await new Promise(r => setTimeout(r, 4000)); } }
   }
   if (img) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'panel', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'panel', idx: i, data: img });
-    const tag = panelVia.startsWith('FLUX Kontext') ? 'K' : panelVia === 'Google AI Studio' ? 'G' : 'F'; job.panelStats = (job.panelStats || '') + tag;
-    job.note = `Anime panels (${panelVia}${panelVia === 'Google AI Studio' ? `, ${used + 1}/${PANEL_CAP} today` : ''}) + AI narrator`; }
-  else if (used >= PANEL_CAP && !job.note) { job.note = `Daily free panel budget (${PANEL_CAP}) used - backup picture chain for the rest`; }
+    const tag = panelVia.startsWith('FLUX Kontext') ? 'K' : panelVia === 'Google AI Studio' ? 'G' : 'F'; job.panelStats = (job.panelStats || 'v3:') + tag;
+    console.log('[panels-v3]', String(job._id), 'scene', i, 'RESULT via:', panelVia, 'stats:', job.panelStats);
+    job.note = `Anime panels v3 (${panelVia}${panelVia === 'Google AI Studio' ? `, ${used + 1}/${PANEL_CAP} today` : ''}) + AI narrator`; }
+  else { console.log('[panels-v3]', String(job._id), 'scene', i, 'RESULT: NO IMAGE - all engines failed'); }
+  { if (used >= PANEL_CAP && !job.note) { job.note = `Daily free panel budget (${PANEL_CAP}) used - backup picture chain for the rest`; } }
   return stillClip(job.scenes[i].prompt, i, img, dm, true);
 }
 const NOTE = { agnes: 'Free AI-video GPU was used up today, so this one uses Agnes AI video', stock: 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)', still: 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion' };
