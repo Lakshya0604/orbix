@@ -473,7 +473,7 @@ const makeOg = () => {
 };
 app.get('/og.png', (_q, r) => { ogPng ||= makeOg(); r.set({ 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' }).send(ogPng); });
 // ---------- documents (RAG) ----------
-const docLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 20, keyGenerator: q => String(q.user?._id || q.ip), standardHeaders: true, legacyHeaders: false, validate: { keyGeneratorIpFallback: false }, message: { error: 'Too many uploads this hour. Try again later.' } });
+const docLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 20, keyGenerator: q => String(q.user?._id || q.ip), standardHeaders: true, legacyHeaders: false, validate: false, message: { error: 'Too many uploads this hour. Try again later.' } });
 app.get('/api/docs', auth, wrap(async (q, r) => r.json((await Doc.find({ userId: q.user._id }).sort('-createdAt')).map(d => ({ id: String(d._id), name: d.name, kind: d.kind, chunks: d.chunks, chars: d.chars, at: d.createdAt })))));
 app.post('/api/docs', auth, docLimiter, express.raw({ type: () => true, limit: LIMITS.fileBytes }), wrap(async (q, r) => {
   if (!Buffer.isBuffer(q.body) || !q.body.length) throw bad('Choose a file to upload.');
