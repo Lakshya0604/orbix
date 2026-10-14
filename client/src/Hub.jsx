@@ -7,7 +7,7 @@ import { orbi, orbiContext } from './Mascot.jsx';
 import { Answer, Steps, saveText, copyText, chatToText } from './parts.jsx';
 
 const SUGGEST = [
-  'Make a 2 second video of a red balloon floating over a lake at sunrise',
+  'Make a short video of a red balloon floating over a lake at sunrise',
   'Explain how React Server Components work in the facebook/react repo',
   'Search the web for the latest on the Model Context Protocol and summarise it',
   'What is the current price of bitcoin and ethereum?',
@@ -77,7 +77,8 @@ export default function Hub({ user, dark, setDark, logout }) {
   const [vStory, setVStory] = useState(false);
   const activeVid = vids.jobs.some(j => !['done', 'failed'].includes(j.status));
   useEffect(() => { loadVids(); }, [loadVids]);
-  useEffect(() => { if (!activeVid) return; const t = setInterval(loadVids, 4000); return () => clearInterval(t); }, [activeVid, loadVids]);
+  useEffect(() => { const t = setInterval(loadVids, activeVid ? 4000 : 8000); return () => clearInterval(t); }, [activeVid, loadVids]);
+  const activeJob = vids.jobs.find(j => !['done', 'failed'].includes(j.status));
   const makeVid = async e => { e.preventDefault(); setVErr(''); try { await api('/api/videos', { method: 'POST', body: { topic: vTopic, long: vLong, char: vChar && !vPanels && !vStory, panels: vPanels && !vStory, story: vStory } }); setVTopic(''); loadVids(); } catch (x) { setVErr(x.message); } };
   const fetchVid = async (id, dl) => { const r = await fetch(`/api/videos/${id}/file${dl ? '?dl=1' : ''}`, { headers: { authorization: `Bearer ${token()}` } }); if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Could not load the video.'); } return URL.createObjectURL(await r.blob()); };
   const playVid = async id => { try { setVPlay({ id, url: await fetchVid(id) }); } catch (x) { setVErr(x.message); } };
@@ -312,6 +313,12 @@ export default function Hub({ user, dark, setDark, logout }) {
           {att && <div className="doc-chip" style={att.error ? { borderColor: '#e5484d' } : undefined}><span>{att.busy ? <>⏳ Reading {att.name}…</> : att.error ? <>⚠️ {att.error}</> : <>{att.kind === 'video' ? '🎬' : '🖼'} <b>{att.name}</b> understood. Ask about it, or say "make a video like this".</>}</span><button type="button" className="x" onClick={() => setAtt(null)} aria-label="Remove">×</button></div>}
           <input ref={picRef} type="file" hidden accept="image/*,.heic,.heif,.avif" onChange={attachMedia} /><input ref={vidRef} type="file" hidden accept="video/*,.mov,.mp4,.webm,.m4v" onChange={attachMedia} />
           <input ref={fileRef} type="file" hidden accept=".pdf,.docx,.txt,.md,.csv,.json,.html,.log,image/*,video/*" onChange={upload} />
+          {activeJob && tab !== 'videos' && (
+            <button type="button" className="doc-chip vid-chip" onClick={() => setTab('videos')}>
+              <span>🎬 <b>{activeJob.title || activeJob.topic || 'Your video'}</b> · {activeJob.stage || 'Working'} · {activeJob.pct || 0}%{activeJob.etaSec ? ` · about ${Math.max(1, Math.round(activeJob.etaSec / 60))} min left` : ''}</span>
+              <span className="vid-chip-bar"><i style={{ width: `${Math.max(3, activeJob.pct || 0)}%` }} /></span>
+            </button>
+          )}
           <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
             <div className="attach">
               <button type="button" className="attach-btn" aria-label="Attach" aria-expanded={attach} disabled={upBusy} onClick={() => setAttach(a => !a)}>{upBusy ? '…' : '+'}</button>
