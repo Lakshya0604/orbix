@@ -316,3 +316,9 @@ input:focus,textarea:focus{border-color:var(--v);box-shadow:0 0 0 4px rgba(109,5
 .vid-card:hover{box-shadow:0 4px 14px rgba(30,20,60,.10)}
 .st-queued,.st-scripting,.st-clips,.st-stitching{background:rgba(255,166,0,.16);color:#b26a00}
 @media(max-width:820px){.vid-opts{grid-template-columns:1fr 1fr}.vids-hero{padding:12px}}
+
+/* tabs strip scrolls inside itself, never drags the whole drawer */
+.tabs{overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
+.tabs::-webkit-scrollbar{display:none}
+.tabs button{flex:0 0 auto}
+.side{overscroll-behavior:contain}
