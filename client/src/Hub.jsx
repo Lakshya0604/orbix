@@ -6,6 +6,14 @@ const Orbit3D = lazy(() => import('./Orbit3D.jsx'));
 import { orbi, orbiContext } from './Mascot.jsx';
 import { Answer, Steps, saveText, copyText, chatToText } from './parts.jsx';
 
+function InlineVid({ id, title, fetchVid, saveVid }) {
+  const [url, setUrl] = useState(null); const [err, setErr] = useState('');
+  useEffect(() => { let live = true; fetchVid(id).then(u => live && setUrl(u)).catch(x => live && setErr(x.message)); return () => { live = false; }; }, [id]);
+  if (err) return <p className="hint">Could not load the video: {err}</p>;
+  if (!url) return <p className="hint">Loading video…</p>;
+  return (<div className="chat-vid"><video src={url} controls playsInline /><div className="vid-act"><button className="btn primary sm" onClick={() => saveVid(id, title)}>Download</button></div></div>);
+}
+
 const SUGGEST = [
   'Make a short video of a red balloon floating over a lake at sunrise',
   'Explain how React Server Components work in the facebook/react repo',
@@ -67,7 +75,23 @@ export default function Hub({ user, dark, setDark, logout }) {
   useEffect(() => { if (busy) orbi('thinking', 'Working on it…', 60000); }, [busy]);
   const loadServers = useCallback(async () => setServers(await api('/api/servers')), []);
   const [vids, setVids] = useState({ enabled: false, jobs: [] }); const [vTopic, setVTopic] = useState(''); const [vErr, setVErr] = useState(''); const [vPlay, setVPlay] = useState(null);
-  const loadVids = useCallback(async () => { try { setVids(await api('/api/videos')); } catch {} }, []);
+  const seenJobs = useRef(null);
+  const loadVids = useCallback(async () => {
+    try {
+      const v = await api('/api/videos'); setVids(v);
+      const prev = seenJobs.current;
+      if (prev === null) { seenJobs.current = new Map(v.jobs.map(j => [j.id, j.status])); return; }
+      for (const j of v.jobs) {
+        const p = prev.get(j.id); prev.set(j.id, j.status);
+        if (p && p !== 'done' && j.status === 'done' && !j.fileDeleted) {
+          setMsgs(m => [...m, { role: 'assistant', videoId: j.id, videoTitle: j.title || j.topic || 'your video', content: `Your video "${j.title || j.topic}" is ready:` }]);
+          orbi('happy', 'Your video is ready!', 6000);
+        } else if (p && p !== 'failed' && j.status === 'failed') {
+          setMsgs(m => [...m, { role: 'assistant', content: `The video "${j.title || j.topic}" could not be made: ${j.error || 'something went wrong'}. Please try again.`, error: true }]);
+        }
+      }
+    } catch {}
+  }, []);
   const [vLong, setVLong] = useState(false);
   const songRef = useRef(null); const [vSongFile, setVSongFile] = useState(null); const [vSong, setVSong] = useState('');
   const pickSong = e => { const f = e.target.files?.[0]; e.target.value = ''; if (!f) return; if (f.size > 15 * 1024 * 1024) { setVErr('Song file is over 15 MB. Try a shorter or smaller one.'); return; } setVErr(''); setVSongFile(f); };
@@ -302,6 +326,7 @@ export default function Hub({ user, dark, setDark, logout }) {
               <motion.div key={i} className={`msg ${m.role} ${m.error ? 'bad' : ''}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
                 {m.role === 'user' ? <div className="bubble">{m.content}</div> : <>
                   <Steps steps={m.steps} model={m.model} /><Answer text={m.content} onError={say} />
+                  {m.videoId && <InlineVid id={m.videoId} title={m.videoTitle} fetchVid={fetchVid} saveVid={saveVid} />}
                   {!m.error && <button className="chip" onClick={() => saveText(m.content, `orbix-answer-${i}.md`)}>⬇ Save answer</button>}
                 </>}
               </motion.div>
