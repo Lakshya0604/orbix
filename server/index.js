@@ -39,7 +39,7 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'], fontSrc: ["'self'", 'https://fonts.gstatic.com'], imgSrc: ["'self'", 'data:', 'https:'], mediaSrc: ["'self'", 'https:'], connectSrc: ["'self'"] } }, crossOriginEmbedderPolicy: false }));
-app.use(cors({ origin: APP_URL || true }));
+app.use(cors({ origin: APP_URL ? [APP_URL, 'https://orbix-video-ly.web.app', 'https://orbix-video-ly.firebaseapp.com'] : true }));
 app.use(express.json({ limit: '200kb' }));
 const stripOps = o => { if (o && typeof o === 'object') for (const k of Object.keys(o)) { if (k.startsWith('$') || k.includes('.')) delete o[k]; else stripOps(o[k]); } return o; };
 app.use((q, _r, n) => { if (q.body) stripOps(q.body); if (q.query) stripOps(q.query); n(); }); // block NoSQL operator injection
