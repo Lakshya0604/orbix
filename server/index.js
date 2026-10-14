@@ -345,7 +345,7 @@ app.get('/api/health/image', wrap(async (q, r) => {
   imgHealth = { at: Date.now(), v }; r.json(v);
 }));
 app.get('/api/videos', auth, wrap(async (q, r) => r.json({ enabled: imageEnabled(), jobs: (await VideoJob.find({ userId: q.user._id }).sort('-createdAt').limit(20)).map(publicJob) })));
-app.post('/api/videos', auth, wrap(async (q, r) => { if (!imageEnabled()) throw bad('Video is not configured.'); if (q.user.isGuest) throw bad('Create an account first.', 403); r.status(201).json(publicJob(await startJob(q.user._id, q.body?.topic, !!q.body?.long, !!q.body?.char, 0, false, false, !!q.body?.manhwa, !!q.body?.panels))); }));
+app.post('/api/videos', auth, wrap(async (q, r) => { if (!imageEnabled()) throw bad('Video is not configured.'); if (q.user.isGuest) throw bad('Create an account first.', 403); r.status(201).json(publicJob(await startJob(q.user._id, q.body?.topic, !!q.body?.long, !!q.body?.char, 0, false, false, !!q.body?.manhwa, !!q.body?.panels || !!q.body?.story, !!q.body?.story))); }));
 app.post('/api/videos/lyric', auth, express.raw({ type: () => true, limit: '15mb' }), wrap(async (q, r) => { if (!imageEnabled()) throw bad('Video is not configured.'); if (q.user.isGuest) throw bad('Create an account first.', 403); let title = ''; try { title = decodeURIComponent(String(q.headers['x-title'] || '')); } catch { /* ignore */ } r.status(201).json(publicJob(await startLyricJob(q.user._id, title, Buffer.isBuffer(q.body) ? q.body : null))); }));
 app.post('/api/videos/:id/remake', auth, wrap(async (q, r) => {
   const job = await VideoJob.findOne({ _id: q.params.id, userId: q.user._id }); if (!job) throw bad('No such video.', 404);

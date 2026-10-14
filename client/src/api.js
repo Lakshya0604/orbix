@@ -1,3 +1,10 @@
+// When hosted separately from the backend (e.g. Firebase Hosting), point API calls at the Render backend.
+const BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+if (BASE && typeof window !== 'undefined' && !window.__orbixApiPatched) {
+  window.__orbixApiPatched = true;
+  const orig = window.fetch.bind(window);
+  window.fetch = (url, ...a) => orig(typeof url === 'string' && url.startsWith('/api') ? BASE + url : url, ...a);
+}
 const KEY = 'orbix_token';
 export const token = () => localStorage.getItem(KEY);
 export const setToken = t => (t ? localStorage.setItem(KEY, t) : localStorage.removeItem(KEY));

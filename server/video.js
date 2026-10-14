@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 import { chatCompletion } from './llm.js';
+import { hordePanel, geminiTTS } from './pipelines/providers.js';
 import { generateClip, generateSpeech, generateSpeechEL, generateAgnesClip, generateImage, generateImageCF, generateImageGemini, generateWithReference, generateInbetweens, transcribeSong } from './media.js';
 const { Schema, model } = mongoose; const run = promisify(execFile);
 
@@ -35,7 +36,7 @@ const sanitizeKw = (kw, subject, shot) => {
 export const VideoJob = model('VideoJob', new Schema({
   userId: { type: Schema.Types.ObjectId, index: true }, topic: String, title: { type: String, default: '' },
   status: { type: String, default: 'queued', index: true }, // queued, scripting, clips, stitching, done, failed
-  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, manhwa: { type: Boolean, default: false }, panels: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, locDesc: { type: String, default: '' }, panelStats: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, landscape: { type: Boolean, default: false }, startedAt: Date, fileDeletedAt: Date,
+  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, manhwa: { type: Boolean, default: false }, panels: { type: Boolean, default: false }, story: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, locDesc: { type: String, default: '' }, panelStats: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, landscape: { type: Boolean, default: false }, startedAt: Date, fileDeletedAt: Date,
   lockUntil: { type: Date, default: null }, bytes: { type: Number, default: 0 }, voiceVia: { type: String, default: '' },
 }, { timestamps: true }));
 export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer, gen: { type: Boolean, default: false } }, { timestamps: true }));
@@ -78,7 +79,7 @@ export async function sweepBlobs(limit = 40) {
 
 
 export const MAX_ACTIVE = 1, MAX_PER_DAY = 4, SCENES = 4, LONG_SCENES = 14;
-export async function startJob(userId, topic, long = false, char = false, scenesWanted = 0, sys = false, landscape = false, manhwa = false, panels = false) {
+export async function startJob(userId, topic, long = false, char = false, scenesWanted = 0, sys = false, landscape = false, manhwa = false, panels = false, story = false) {
   const t = String(topic || '').trim().slice(0, 200);
   if (t.length < 3) throw Object.assign(new Error('Tell me what the video is about.'), { status: 400 });
   await VideoJob.updateMany({ userId, status: { $nin: ['done', 'failed', 'queued'] }, updatedAt: { $lt: new Date(Date.now() - 2 * 3600000) }, stage: { $not: /quota/i } }, { status: 'failed', error: 'This one got stuck (the server restarted). Please start it again.' });
@@ -86,7 +87,7 @@ export async function startJob(userId, topic, long = false, char = false, scenes
   if (await VideoJob.countDocuments({ userId, status: { $nin: ['done', 'failed'] } }) >= MAX_ACTIVE) throw Object.assign(new Error('One video is already being made. Wait for it to finish.'), { status: 429 });
   if (await VideoJob.countDocuments({ userId, createdAt: { $gt: new Date(Date.now() - 86400000) } }) >= MAX_PER_DAY) throw Object.assign(new Error(`Free limit: ${MAX_PER_DAY} videos per day.`), { status: 429 });
   }
-  return VideoJob.create({ userId, topic: t, long: !!long, char: !!char, scenesWanted: Math.min(160, Math.max(0, Math.round(scenesWanted) || 0)), landscape: !!landscape, manhwa: !!manhwa, panels: !!panels, startedAt: new Date() });
+  return VideoJob.create({ userId, topic: t, long: !!long, char: !!char, scenesWanted: Math.min(160, Math.max(0, Math.round(scenesWanted) || 0)), landscape: !!landscape, manhwa: !!manhwa, panels: !!panels || !!story, story: !!story, startedAt: new Date() });
 }
 
 export async function startLyricJob(userId, title, buf) {
@@ -191,7 +192,7 @@ async function stitch(job) {
       job.stage = `Joining clip ${segs.length + 1} of ${clips.length}`; await job.save().catch(() => {});
       const cf = path.join(dir, `c${c.idx}.mp4`); await fs.writeFile(cf, await blobBytes(c)); const cd = (await dur(cf)) || 4;
       const ab = await VideoBlob.findOne({ jobId: job._id, kind: 'audio', idx: c.idx }); let af = null, ad = 0;
-      if (ab) { const raw = path.join(dir, `a${c.idx}.mp3`); await fs.writeFile(raw, await blobBytes(ab)); af = path.join(dir, `t${c.idx}.mp3`); try { await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', raw, '-af', 'silenceremove=start_periods=1:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_threshold=-50dB,areverse', af]); } catch { af = raw; } ad = await dur(af); if (!ad && af !== raw) { af = raw; ad = await dur(af); } if (ad) voiced++; else af = null; }
+      if (ab) { const raw = path.join(dir, `a${c.idx}.mp3`); await fs.writeFile(raw, await blobBytes(ab)); af = path.join(dir, `t${c.idx}.mp3`); try { await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', raw, '-af', (job.story ? 'atempo=1.25,' : '') + 'silenceremove=start_periods=1:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_threshold=-50dB,areverse', af]); } catch { af = raw; } ad = await dur(af); if (!ad && af !== raw) { af = raw; ad = await dur(af); } if (ad) voiced++; else af = null; }
       const D = af ? Math.max(1.5, ad + 0.12) : cd; const seg = path.join(dir, `s${c.idx}.mp4`);
       const dm = DIMS(job);
       let vf = `scale=${dm.W}:${dm.H}:force_original_aspect_ratio=increase,crop=${dm.W}:${dm.H},fps=24,fade=t=in:st=0:d=0.3,fade=t=out:st=${(D - 0.3).toFixed(2)}:d=0.3`;
@@ -199,6 +200,16 @@ async function stitch(job) {
       if (fd && say) { await fs.writeFile(path.join(dir, `u${c.idx}.ass`), assFile(say, 0.05, Math.max(0.3, D - 0.1), dm.W, dm.H)); vf += `,subtitles=u${c.idx}.ass:fontsdir=${fd}`; cw = dir; }
       await run(ffmpegPath, ['-y', '-loglevel', 'error', '-stream_loop', '-1', '-i', cf, ...(af ? ['-i', af] : ['-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo']), '-vf', vf, '-af', 'aresample=44100,apad', '-t', D.toFixed(2), '-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', job.long ? '30' : '26', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '44100', '-ac', '2', '-shortest', '-movflags', '+faststart', seg], { cwd: cw, timeout: 120000 });
       segs.push(`file '${seg}'`);
+    }
+    if (job.story) {
+      try {
+        const intro = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'assets', 'brand', 'intro.mp4');
+        if (await fs.stat(intro).then(s => s.size > 10000, () => false)) {
+          const dm0 = DIMS(job); const iseg = path.join(dir, 'intro-seg.mp4');
+          await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', intro, '-vf', `scale=${dm0.W}:${dm0.H}:force_original_aspect_ratio=decrease,pad=${dm0.W}:${dm0.H}:(ow-iw)/2:(oh-ih)/2:black,fps=24`, '-af', 'aresample=44100', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '44100', '-ac', '2', iseg], { timeout: 60000 });
+          segs.unshift(`file '${iseg}'`);
+        }
+      } catch (e) { console.error('brand intro', e.message); }
     }
     await fs.writeFile(path.join(dir, 'l.txt'), segs.join('\n'));
     const out = path.join(dir, 'out.mp4');
@@ -212,7 +223,7 @@ async function stitch(job) {
     let data = await fs.readFile(out);
     if (data.length > (job.scenesWanted ? 150e6 : 15.5e6)) throw new Error('This video is too long to save on the free plan yet. Try a shorter story.');
     await VideoBlob.deleteMany({ jobId: job._id, kind: 'final' }); for (let p = 0; p * 7e6 < data.length; p++) await VideoBlob.create({ jobId: job._id, kind: 'final', idx: p, data: data.subarray(p * 7e6, (p + 1) * 7e6) });
-    sweepBlobs(400).catch(e => console.error('sweep-after-stitch', e.message)); job.bytes = data.length; job.status = 'done'; job.note = `${clips.length} clips, ${voiced ? `${voiced} with voiceover${job.voiceVia ? ` (${job.voiceVia})` : ''}` : 'no voiceover (voice service was busy)'}, ${job.landscape ? 'landscape 16:9' : 'vertical 9:16'}${job.note ? ' · ' + job.note : ''}`; await job.save();
+    sweepBlobs(400).catch(e => console.error('sweep-after-stitch', e.message)); job.bytes = data.length; job.status = 'done'; job.note = `${clips.length} clips${job.story ? ' + branded intro' : ''}, ${voiced ? `${voiced} with voiceover${job.voiceVia ? ` (${job.voiceVia})` : ''}` : 'no voiceover (voice service was busy)'}, ${job.landscape ? 'landscape 16:9' : 'vertical 9:16'}${job.note ? ' · ' + job.note : ''}`; await job.save();
   } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
 
@@ -395,6 +406,43 @@ async function panelsClip(job, i) {
   { if (used >= PANEL_CAP && !job.note) { job.note = `Daily free panel budget (${PANEL_CAP}) used - backup picture chain for the rest`; } }
   return stillClip(job.scenes[i].prompt, i, img, dm, true);
 }
+
+// UNIFIED PIPELINE - story mode (proven TK pipeline: AI Horde img2img panels from one face reference + Gemini TTS cast voices).
+const STORY_STYLE = 'Painterly semi-realistic horror illustration like a dark webtoon / graphic novel - VISIBLE brush strokes, ink outlines, hand-painted comic art texture. NOT a photograph, NOT photorealistic, NOT 3D render, NOT film still';
+const STORY_NEG = 'photograph, photorealistic, anime, cartoon, extra fingers, deformed, watermark, text, old man, gaunt, ghoul, beard';
+const STORY_VOICE = process.env.STORY_VOICE || 'Gacrux';
+const STORY_VOICE_STYLE = process.env.STORY_VOICE_STYLE || 'Speak like a dark, serious Hindi horror movie narrator. Slow, deep, deliberate, building dread.';
+async function storyClip(job, i) {
+  const get = async url => { const r = await fetch(url, { signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Could not download the reference picture.'); return Buffer.from(await r.arrayBuffer()); };
+  let ref = await VideoBlob.findOne({ jobId: job._id, kind: 'storyref' });
+  if (!ref) {
+    await stage(job, 'Drawing the main character');
+    try {
+      const url = await generateImage({ prompt: `${job.charDesc || job.topic}, full body, standing, plain light grey background, even soft lighting, face hair and clothes clearly visible, character reference sheet, ${STORY_STYLE}, no text, no watermark.`, width: 768, height: 768 });
+      ref = await VideoBlob.create({ jobId: job._id, kind: 'storyref', idx: 0, data: await get(url) });
+    } catch (e) { console.error('storyref', String(e.message).slice(0, 100)); }
+  }
+  if (ref) {
+    await stage(job, `Scene ${i + 1} of ${job.scenes.length}: painting (fixed character)`);
+    try {
+      const img = await hordePanel({ prompt: `${STORY_STYLE}. ${String(job.scenes[i].prompt).slice(0, 380)}. ${job.locDesc ? 'Setting: ' + job.locDesc + '.' : ''}`, negative: STORY_NEG, refImage: await blobBytes(ref), denoise: 0.66 });
+      if (img?.length > 5000) {
+        await VideoBlob.deleteMany({ jobId: job._id, kind: 'panel', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'panel', idx: i, data: img });
+        job.note = 'Story pipeline: fixed-character painterly panels (AI Horde) + narrator'; job.panelStats = (job.panelStats || 'story:') + 'H'; await job.save().catch(() => {});
+        return stillClip(job.scenes[i].prompt, i, img, DIMS(job), true);
+      }
+    } catch (e) { console.error('horde story panel', String(e.message).slice(0, 120)); }
+  }
+  return panelsClip(job, i); // proven fallback chain
+}
+async function storyVoice(job, i) {
+  if (!process.env.GEMINI_API_KEY && !process.env.GEMINI_API_KEY_2) return false;
+  try {
+    const data = await geminiTTS({ text: job.scenes[i].say, voiceName: STORY_VOICE, style: STORY_VOICE_STYLE });
+    if (data?.length > 200) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'audio', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'audio', idx: i, data }); job.voiceVia = 'gemini-tts'; await job.save().catch(() => {}); return true; }
+  } catch (e) { console.error('gemini story voice', String(e.message).slice(0, 120)); }
+  return false;
+}
 const NOTE = { agnes: 'Free AI-video GPU was used up today, so this one uses Agnes AI video', stock: 'Free AI-video GPU was used up today, so this one uses free stock footage (Pixabay)', still: 'Free AI-video GPU was used up today, so this one uses AI pictures with slow motion' };
 let agnesOffUntil = 0;
 const fallbackMode = () => process.env.AGNES_API_KEY && Date.now() > agnesOffUntil ? 'agnes' : process.env.PIXABAY_KEY ? 'stock' : 'still';
@@ -407,7 +455,8 @@ async function makeScene(job, i) {
   const tag = `Clip ${i + 1} of ${job.scenes.length}`;
   let data;
   const useChar = !job.lyric && !job.panels;
-  if (job.panels) { await stage(job, `${tag}: drawing panel`); data = await panelsClip(job, i); }
+  if (job.panels && job.story) { await stage(job, `${tag}: painting panel`); data = await storyClip(job, i); }
+  else if (job.panels) { await stage(job, `${tag}: drawing panel`); data = await panelsClip(job, i); }
   if (useChar) { data = await charClip(job, i); job.note = job.manhwa ? 'AI manhwa panels with one fixed character (FLUX Kontext), slow scroll, voiceover' : 'AI animated frames with one fixed character (FLUX Kontext), cinematic motion'; }
   if (!useChar && !job.panels && job.mode === 'ai' && Date.now() - gpuDownAt < 1800000 && fallbackMode() !== 'still') { job.mode = fallbackMode(); job.note = NOTE[job.mode]; await job.save(); }
   if (!useChar && !job.panels && (job.mode === 'ai' || !job.mode)) {
@@ -442,7 +491,8 @@ async function makeScene(job, i) {
   if (job.scenes[i].say && !job.lyric) {
     await stage(job, `${tag}: voiceover`);
     let doneVoice = false;
-    if (job.panels && process.env.ELEVENLABS_API_KEY) {
+    if (job.story) doneVoice = await storyVoice(job, i);
+    if (!doneVoice && job.panels && process.env.ELEVENLABS_API_KEY) {
       try { const au = await generateSpeechEL({ text: job.scenes[i].say }); if (au?.data?.length > 200) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'audio', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'audio', idx: i, data: au.data }); job.voiceVia = 'elevenlabs'; doneVoice = true; } } catch (e) { console.error('el voice', String(e.message).slice(0, 120)); }
     }
     if (!doneVoice) try { const au = await generateSpeech({ text: job.scenes[i].say, hindi: /[\u0900-\u097F]/.test(job.scenes[i].say) }); if (au?.data?.length > 200) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'audio', idx: i }); await VideoBlob.create({ jobId: job._id, kind: 'audio', idx: i, data: au.data }); if (!job.voiceVia) job.voiceVia = au.via; if (au.via !== job.voiceVia) job.voiceVia = 'mixed'; } } catch (e) { console.error('voice', e.message.slice(0, 120)); }
