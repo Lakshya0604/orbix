@@ -251,16 +251,23 @@ export default function Hub({ user, dark, setDark, logout }) {
               <button className="btn primary sm">Connect</button>
             </form>}
           </section>}
-          {tab === 'videos' && <section>
-            <form onSubmit={makeVid} className="vid-form"><input value={vTopic} onChange={e => setVTopic(e.target.value)} placeholder="Topic, e.g. a haunted lighthouse" maxLength={200} disabled={!vids.enabled} /><button className="btn primary sm" disabled={!vids.enabled || vTopic.trim().length < 3 || activeVid}>Make video</button></form>
-            <p className="hint">Orbix writes a short script with a voiceover, makes 4 vertical AI clips (9:16) and stitches them with the voice. It runs in the background, so you can leave. Free limits: 1 at a time, 4 a day, about 16 seconds in total.</p>
-            {vErr && <div className="msg err" role="alert">{vErr}</div>}
-            <label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vLong} onChange={e => setVLong(e.target.checked)} disabled={!vids.enabled} /> Long story mode (about 2 minutes, a full story from start to end). Takes about 8 to 10 minutes to make.</label><label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vLong} onChange={e => setVLong(e.target.checked)} disabled={!vids.enabled} /> Long story mode (about 2 minutes, a full story from start to end). Takes about 8 to 10 minutes to make.</label>
-                        <label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vPanels} onChange={e => setVPanels(e.target.checked)} disabled={!vids.enabled} /> Anime panels + AI narrator (new: cinematic anime panels, fast, shows time left)</label>
-                        <label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vStory} onChange={e => setVStory(e.target.checked)} disabled={!vids.enabled} /> Story pipeline (fixed character, painterly horror panels, narrator, branded intro)</label>
-<label className="hint" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}><input type="checkbox" checked={vChar} onChange={e => setVChar(e.target.checked)} disabled={!vids.enabled} /> Same animated character in every scene (AI pictures, uses the free daily GPU time, so about one short video a day)</label>
-            <p className="hint" style={{ margin: '10px 0 4px' }}><b>Lyric video:</b> pick a song, Orbix writes the words on screen in sync and adds matching footage.</p>
-            <div className="vid-form"><input value={vSong} onChange={e => setVSong(e.target.value)} placeholder="Song title (optional)" maxLength={120} disabled={!vids.enabled} /><button type="button" className="btn ghost sm" onClick={() => songRef.current?.click()} disabled={!vids.enabled || activeVid}>{vSongFile ? vSongFile.name.slice(0, 24) : 'Choose song'}</button><button type="button" className="btn primary sm" onClick={makeLyric} disabled={!vids.enabled || !vSongFile || activeVid}>Make lyric video</button></div>
+          {tab === 'videos' && <section className="vids">
+            <div className="vids-hero">
+              <h3>🎬 New video</h3>
+              <form onSubmit={makeVid} className="vid-form"><input value={vTopic} onChange={e => setVTopic(e.target.value)} placeholder="Topic, e.g. a haunted lighthouse" maxLength={200} disabled={!vids.enabled} /><button className="btn primary sm" disabled={!vids.enabled || vTopic.trim().length < 3 || activeVid}>Make video</button></form>
+              <p className="hint">Orbix writes the script, makes 4 vertical AI clips (9:16) with a voiceover and stitches them. It runs in the background - the result lands in chat. Free limits: 1 at a time, 4 a day.</p>
+              {vErr && <div className="msg err" role="alert">{vErr}</div>}
+              <div className="vid-opts">
+                <label className={'opt' + (vLong ? ' on' : '')}><input type="checkbox" checked={vLong} onChange={e => setVLong(e.target.checked)} disabled={!vids.enabled} /><b>Long story</b><small>~2 min full story · 8-10 min to make</small></label>
+                <label className={'opt' + (vPanels ? ' on' : '')}><input type="checkbox" checked={vPanels} onChange={e => { const c = e.target.checked; setVPanels(c); if (c) { setVStory(false); setVChar(false); } }} disabled={!vids.enabled} /><b>Anime panels</b><small>cinematic panels + AI narrator</small></label>
+                <label className={'opt' + (vStory ? ' on' : '')}><input type="checkbox" checked={vStory} onChange={e => { const c = e.target.checked; setVStory(c); if (c) { setVPanels(false); setVChar(false); } }} disabled={!vids.enabled} /><b>Horror story</b><small>fixed character · branded intro</small></label>
+                <label className={'opt' + (vChar ? ' on' : '')}><input type="checkbox" checked={vChar} onChange={e => { const c = e.target.checked; setVChar(c); if (c) { setVPanels(false); setVStory(false); } }} disabled={!vids.enabled} /><b>Same character</b><small>one animated hero in every scene</small></label>
+              </div>
+              <details className="vid-adv">
+                <summary>🎵 Lyric video <span>pick a song - words on screen in sync, matching footage</span></summary>
+                <div className="vid-form"><input value={vSong} onChange={e => setVSong(e.target.value)} placeholder="Song title (optional)" maxLength={120} disabled={!vids.enabled} /><button type="button" className="btn ghost sm" onClick={() => songRef.current?.click()} disabled={!vids.enabled || activeVid}>{vSongFile ? vSongFile.name.slice(0, 24) : 'Choose song'}</button><button type="button" className="btn primary sm" onClick={makeLyric} disabled={!vids.enabled || !vSongFile || activeVid}>Make lyric video</button></div>
+              </details>
+            </div>
             <input ref={songRef} type="file" hidden accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac,.aac" onChange={pickSong} />
             {vids.jobs.map(j => <div key={j.id} className="vid-card">
               <div className="vid-top"><b>{j.title || j.topic}</b><span className={`vid-st st-${j.status}`}>{{ queued: 'Waiting', scripting: 'Writing script', clips: `Clips ${j.scenes.filter(x => x === 'ok').length}/${j.scenes.length || '?'}`, stitching: 'Stitching', done: 'Ready', failed: 'Failed' }[j.status]}</span></div>

@@ -217,6 +217,7 @@ async function stitch(job) {
     // Horror atmosphere: a low synthesized drone (55 Hz sine + lowpassed brown noise) mixed under the whole video; the voice stays on top. If this pass fails, the original mix is kept.
     const outD = path.join(dir, 'outd.mp4');
     try {
+      if (!job.story) throw new Error('skip');
       await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', out, '-f', 'lavfi', '-i', 'sine=frequency=55', '-f', 'lavfi', '-i', 'anoisesrc=color=brown:amplitude=0.7', '-filter_complex', '[1:a]volume=0.15[s];[2:a]lowpass=f=200,volume=0.35[n];[0:a][s][n]amix=inputs=3:duration=first:dropout_transition=0,alimiter=limit=0.95[a]', '-map', '0:v', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outD], { timeout: 180000 });
       await fs.rename(outD, out); job.note = `${job.note ? job.note + ' · ' : ''}horror atmosphere`; if (job.panelStats) job.note = `panels via ${job.panelStats} (K=Kontext fixed character, G=Gemini, F=free FLUX) · ` + job.note;
     } catch { }
