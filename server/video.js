@@ -10,7 +10,7 @@ import ffmpegPath from 'ffmpeg-static';
 import { chatCompletion } from './llm.js';
 import { hordePanel, geminiTTS } from './pipelines/providers.js';
 import { generateClip, generateSpeech, generateSpeechEL, generateAgnesClip, generateImage, generateImageCF, generateImageGemini, generateWithReference, generateInbetweens, transcribeSong } from './media.js';
-import { buildLyricsAss, headerEvent, probeDuration as probeDur, buildTrack, renderArgs as amvRenderArgs, mapTiming, pickCuts, buildThumb } from './pipelines/amv.js';
+import { buildLyricsAss, headerEvent, probeDuration as probeDur, buildTrack, renderArgs as amvRenderArgs, mapTiming, pickCuts, buildThumb, downloadTo } from './pipelines/amv.js';
 import { amvYoutubeUpload } from './amv-upload.js';
 const { Schema, model } = mongoose; const run = promisify(execFile);
 
@@ -562,10 +562,12 @@ async function stitchAmv(job) {
     const fd = await fontsDir(); const song = await VideoBlob.findOne({ jobId: job._id, kind: 'song' }); if (!song) throw new Error('The song file is missing.');
     const sf = path.join(dir, 'song.bin'); await fs.writeFile(sf, await blobBytes(song));
     const dur = job.songDur || await probeDur(sf); if (!dur) throw new Error('Could not read the song file.');
-    job.stage = 'Reading the anime source'; await job.save().catch(() => {});
-    const srcDur = await probeDur(job.animeUrl); if (!srcDur || srcDur < dur * 0.5) throw new Error('The anime link did not look like a video. Use a direct mp4/mkv link (for example an archive.org download link).');
+    job.stage = 'Downloading the anime source'; await job.save().catch(() => {});
+    const srcFile = path.join(dir, 'anime.src');
+    await downloadTo(job.animeUrl, srcFile, { onProgress: async g => { job.stage = `Downloading the anime source (${(g / 1e6).toFixed(0)} MB)`; await job.save().catch(() => {}); } });
+    const srcDur = await probeDur(srcFile); if (!srcDur || srcDur < dur * 0.5) throw new Error('The anime link did not look like a video. Use a direct mp4/mkv link (for example an archive.org download link).');
     const cuts = pickCuts(srcDur, dur);
-    const track = await buildTrack(job.animeUrl, cuts, dir, null, async (i, n) => { job.stage = `Cutting anime clip ${i} of ${n}`; await job.save().catch(() => {}); });
+    const track = await buildTrack(srcFile, cuts, dir, null, async (i, n) => { job.stage = `Cutting anime clip ${i} of ${n}`; await job.save().catch(() => {}); });
     const head = (job.topic + (job.subject ? `  |  ${job.subject}` : '')).replace(/[{}\\]/g, '');
     const ass = buildLyricsAss(job.scenes.map(s => ({ start: s.t0, end: s.t1, text: s.say }))) + headerEvent(head) + '\n';
     const af = path.join(dir, 'lyrics.ass'); await fs.writeFile(af, ass);

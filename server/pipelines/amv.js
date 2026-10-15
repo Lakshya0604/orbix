@@ -5,6 +5,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 const run = promisify(execFile);
@@ -193,4 +195,18 @@ export async function buildThumb(src, atSec, title, sub, out, fontsDir = FONT_DI
   await run(ffmpegPath, thumbArgs(src, atSec, assPath, out, fontsDir), { timeout: 120000 });
   const st = await fs.stat(out); if (!st.size) throw new Error('buildThumb: empty output');
   return out;
+}
+
+// Download a remote source to disk first: ffmpeg-static segfaults on https inputs (15 Oct test),
+// and local slicing is faster than 24 range-seeking reads. Cap guards the free-plan disk.
+export async function downloadTo(url, dest, { maxBytes = 2500e6, onProgress = null } = {}) {
+  const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(120000) });
+  if (!r.ok || !r.body) throw new Error(`The anime link could not be fetched (${r.status}). Use a direct mp4/mkv link.`);
+  const len = Number(r.headers.get('content-length') || 0);
+  if (len > maxBytes) throw new Error(`The anime file is ${(len / 1e9).toFixed(1)} GB - too big for the free plan (max ${(maxBytes / 1e9).toFixed(1)} GB).`);
+  let got = 0;
+  const { Transform } = await import('node:stream');
+  const meter = new Transform({ transform(c, _e, cb) { got += c.length; if (got > maxBytes) { cb(new Error('File grew past the size limit.')); return; } onProgress?.(got); cb(null, c); } });
+  await pipeline(r.body, meter, createWriteStream(dest));
+  return got;
 }
