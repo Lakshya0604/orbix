@@ -490,6 +490,15 @@ app.post('/api/docs', auth, docLimiter, express.raw({ type: () => true, limit: L
   r.status(201).json({ id: String(d._id), name: d.name, chunks: d.chunks });
 }));
 app.delete('/api/docs/:id', auth, wrap(async (q, r) => { await Promise.all([Doc.deleteOne({ _id: q.params.id, userId: q.user._id }), Chunk.deleteMany({ docId: q.params.id, userId: q.user._id })]); r.json({ ok: true }); }));
+// ---------- SEO: Render host is API-only; canonical frontend is Firebase (orbix-video-ly.web.app) ----------
+app.get(['/robots.txt', '/sitemap.xml'], (req, res, next) => {
+  if (req.hostname.endsWith('onrender.com')) {
+    if (req.path === '/robots.txt') return res.type('text/plain').send('User-agent: *\nDisallow: /\n');
+    return res.status(404).end();
+  }
+  next();
+});
+
 // ---------- static client ----------
 const dist = path.join(__dirname, '../client/dist');
 if (fs.existsSync(dist)) { app.use(express.static(dist, { maxAge: '1h', setHeaders: (res, f) => { if (/[\\/]assets[\\/]/.test(f)) res.setHeader('cache-control', 'public, max-age=31536000, immutable'); else if (/\.html$/.test(f)) res.setHeader('cache-control', 'no-cache'); } })); app.get(/^(?!\/api).*/, (_q, r) => r.sendFile(path.join(dist, 'index.html'))); }
