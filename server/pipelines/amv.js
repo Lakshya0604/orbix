@@ -151,7 +151,7 @@ export async function buildGrids(srcFile, dir, { gridSpan = 750, step = 30, cols
 
 // Deterministic scene spread for unattended mode: n cuts evenly across the source,
 // skipping head/tail (fan-upload logos, credit tails). Agent-assisted picking comes later.
-export function pickCuts(srcDur, total, { n = 24, head = 45, tail = 45 } = {}) {
+export function pickCuts(srcDur, total, { n = 24, head = 60, tail = 90 } = {}) { // head: fan-upload logos; tail: credit rolls (BBB selftest 18:52)
   const lo = Math.min(head, srcDur * 0.05), hi = Math.max(lo + 1, srcDur - Math.min(tail, srcDur * 0.05));
   const span = hi - lo, seg = total / n, cuts = [];
   for (let i = 0; i < n; i++) {
