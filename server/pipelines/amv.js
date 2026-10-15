@@ -11,8 +11,8 @@ import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 const run = promisify(execFile);
 const FONT_DIR = process.env.AMV_FONT_DIR || '/usr/share/fonts/truetype/noto';
-const SLICE_PRESET = process.env.AMV_SLICE_PRESET || 'fast'; // Render free: set veryfast
-const RENDER_PRESET = process.env.AMV_RENDER_PRESET || 'medium';
+const SLICE_PRESET = process.env.AMV_SLICE_PRESET || 'veryfast'; // Render free 512MB: x264 RAM scales with preset
+const RENDER_PRESET = process.env.AMV_RENDER_PRESET || 'veryfast';
 
 const LYRIC_FONT = 'Noto Sans Devanagari';
 const HEAD_FONT = 'Noto Sans';
@@ -80,7 +80,7 @@ export async function probeDuration(file) {
 export function sliceArgs(src, mt, dur, out, crop = null) {
   const vf = `${crop ? crop + ',' : ''}scale=1920:1080:flags=lanczos,fps=24,eq=saturation=1.06:contrast=1.02,setsar=1`;
   return ['-y', '-loglevel', 'error', '-ss', String(mt), '-t', String(dur + 0.5), '-i', src,
-    '-vf', vf, '-t', String(dur), '-an', '-c:v', 'libx264', '-preset', SLICE_PRESET, '-crf', '17', '-pix_fmt', 'yuv420p', out];
+    '-vf', vf, '-t', String(dur), '-an', '-c:v', 'libx264', '-preset', SLICE_PRESET, '-crf', '17', '-threads', '2', '-pix_fmt', 'yuv420p', out];
 }
 
 export async function buildTrack(srcFile, cuts, dir, crop = null, onProgress = null) {
@@ -104,7 +104,7 @@ export function renderArgs(track, song, assFile, out, dur, fontsDir = FONT_DIR) 
   const vf = `fade=t=in:st=0:d=1,fade=t=out:st=${(dur - 2.4).toFixed(2)}:d=2.4,subtitles=${assFile}:fontsdir=${fontsDir}`;
   return ['-y', '-loglevel', 'error', '-i', track, '-i', song,
     '-vf', vf, '-filter_complex', af, '-map', '0:v', '-map', '[aout]',
-    '-t', String(dur), '-c:v', 'libx264', '-preset', RENDER_PRESET, '-crf', '19', '-pix_fmt', 'yuv420p',
+    '-t', String(dur), '-c:v', 'libx264', '-preset', RENDER_PRESET, '-crf', '19', '-threads', '2', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', out];
 }
 
