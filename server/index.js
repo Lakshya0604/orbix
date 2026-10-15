@@ -19,7 +19,7 @@ import { runAgent } from './agent.js';
 import { CHAIN, visionDescribe, updateMemory } from './llm.js';
 import { parseModel, modelInfo, runModel, spaceHost, spaceInfo, runSpace } from './hf.js';
 import { generateImage, imageEnabled, generateClip } from './media.js';
-import { VideoJob, VideoBlob, startJob, startLyricJob, startLyricSelftest, startAmvJob, startWorker, publicJob, blobBytes, removeJobFiles, sweepBlobs } from './video.js';
+import { VideoJob, VideoBlob, startJob, startLyricJob, startLyricSelftest, startAmvJob, startAmvSelftest, startWorker, publicJob, blobBytes, removeJobFiles, sweepBlobs } from './video.js';
 import { Doc, Chunk, addDocument, hasDocs, LIMITS } from './rag.js';
 import { chatCompletion } from './llm.js';
 
@@ -358,6 +358,13 @@ app.get('/api/health/lyric', wrap(async (q, r) => {
   if (!job || (Number(q.query.fresh) > 0 && new Date(job.createdAt).getTime() < Number(q.query.fresh))) { await VideoJob.deleteMany({ userId: SELFTEST, lyric: true, status: { $in: ['done', 'failed'] } }); job = await startLyricSelftest(SELFTEST); }
   r.json({ ...publicJob(job), final: job.status === 'done' ? 'stored' : null, lines: job.status === 'clips' || job.status === 'stitching' || job.status === 'done' ? (job.scenes || []).map(s => ({ t0: s.t0, t1: s.t1, say: s.say, kw: s.kw, state: s.state })) : [] });
 }));
+app.get('/api/health/amv', wrap(async (q, r) => {
+  let job = await VideoJob.findOne({ userId: SELFTEST, amv: true }).sort('-createdAt');
+  if (!job || (Number(q.query.fresh) > 0 && new Date(job.createdAt).getTime() < Number(q.query.fresh))) { await VideoJob.deleteMany({ userId: SELFTEST, amv: true, status: { $in: ['done', 'failed'] } }); job = await startAmvSelftest(SELFTEST); }
+  r.json(publicJob(job));
+}));
+app.get('/api/health/amv/file', wrap(async (_q, r) => { const job = await VideoJob.findOne({ userId: SELFTEST, amv: true, status: 'done' }).sort('-createdAt'); const bs = job && await VideoBlob.find({ jobId: job._id, kind: 'final' }).sort('idx'); if (!bs || !bs.length) return r.status(404).json({ error: 'none' }); r.set('content-type', 'video/mp4').send(Buffer.concat(bs.map(b => b.data))); }));
+app.get('/api/health/amv/thumb', wrap(async (_q, r) => { const job = await VideoJob.findOne({ userId: SELFTEST, amv: true, status: 'done' }).sort('-createdAt'); const b = job && await VideoBlob.findOne({ jobId: job._id, kind: 'thumb' }); if (!b) return r.status(404).json({ error: 'none' }); r.set('content-type', 'image/jpeg').send(await blobBytes(b)); }));
 app.get('/api/health/lyric/file', wrap(async (_q, r) => { const job = await VideoJob.findOne({ userId: SELFTEST, lyric: true, status: 'done' }).sort('-createdAt'); const bs = job && await VideoBlob.find({ jobId: job._id, kind: 'final' }).sort('idx'); if (!bs || !bs.length) return r.status(404).json({ error: 'none' }); r.set('content-type', 'video/mp4').send(bs.length > 1 ? Buffer.concat(bs.map(b => b.data)) : bs[0].data); }));
 app.get('/api/videos/:id/file', auth, wrap(async (q, r) => {
   const job = await VideoJob.findOne({ _id: q.params.id, userId: q.user._id }); if (!job || job.status !== 'done') throw bad('Not ready.', 404);

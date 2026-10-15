@@ -122,6 +122,10 @@ function assFile(text, a, b, pw = W, ph = H) {
   const dev = /[\u0900-\u097F]/.test(text); const clean = String(text).replace(/[{}\\]/g, '').replace(/\s+/g, ' ').trim(); const fsz = pw > ph ? 32 : 40, mv = Math.round(ph * 0.08);
   return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${pw}\nPlayResY: ${ph}\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Default,${dev ? 'Noto Sans Devanagari' : 'Noto Sans'},${fsz},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,24,24,${mv},1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\nDialogue: 0,${assTime(a)},${assTime(b)},Default,,0,0,0,,${clean}\n`;
 }
+export async function startAmvSelftest(userId) {
+  const r = await fetch('https://archive.org/download/HighlandBaptistChurchChoirAmazingGrace/Amazing_Grace_Acapella_vbr.mp3', { redirect: 'follow', signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Test song not reachable.');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-t-')); try { const a = path.join(dir, 'a.mp3'), b = path.join(dir, 'b.mp3'); await fs.writeFile(a, Buffer.from(await r.arrayBuffer())); await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', a, '-t', '36', '-b:a', '96k', b], { timeout: 60000 }); return await startAmvJob(userId, 'Amazing Grace (AMV selftest)', await fs.readFile(b), 'https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4', 'Big Buck Bunny (selftest)'); } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}
 const MAX_AMV_DUR = 390; // seconds, free-plan guard
 async function amvPrepare(job) {
   let song = null; for (let k = 0; k < 8 && !song; k++) { song = await VideoBlob.findOne({ jobId: job._id, kind: 'song' }); if (!song) await new Promise(r => setTimeout(r, 2500)); } if (!song) throw new Error('The song file is missing.');
