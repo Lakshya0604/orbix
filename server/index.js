@@ -19,7 +19,7 @@ import { runAgent } from './agent.js';
 import { CHAIN, visionDescribe, updateMemory } from './llm.js';
 import { parseModel, modelInfo, runModel, spaceHost, spaceInfo, runSpace } from './hf.js';
 import { generateImage, imageEnabled, generateClip } from './media.js';
-import { VideoJob, VideoBlob, startJob, startLyricJob, startLyricSelftest, startWorker, publicJob, blobBytes, removeJobFiles, sweepBlobs } from './video.js';
+import { VideoJob, VideoBlob, startJob, startLyricJob, startLyricSelftest, startAmvJob, startWorker, publicJob, blobBytes, removeJobFiles, sweepBlobs } from './video.js';
 import { Doc, Chunk, addDocument, hasDocs, LIMITS } from './rag.js';
 import { chatCompletion } from './llm.js';
 
@@ -347,6 +347,7 @@ app.get('/api/health/image', wrap(async (q, r) => {
 app.get('/api/videos', auth, wrap(async (q, r) => r.json({ enabled: imageEnabled(), jobs: (await VideoJob.find({ userId: q.user._id }).sort('-createdAt').limit(20)).map(publicJob) })));
 app.post('/api/videos', auth, wrap(async (q, r) => { if (!imageEnabled()) throw bad('Video is not configured.'); if (q.user.isGuest) throw bad('Create an account first.', 403); r.status(201).json(publicJob(await startJob(q.user._id, q.body?.topic, !!q.body?.long, !!q.body?.char, 0, false, false, !!q.body?.manhwa, !!q.body?.panels || !!q.body?.story, !!q.body?.story))); }));
 app.post('/api/videos/lyric', auth, express.raw({ type: () => true, limit: '15mb' }), wrap(async (q, r) => { if (!imageEnabled()) throw bad('Video is not configured.'); if (q.user.isGuest) throw bad('Create an account first.', 403); let title = ''; try { title = decodeURIComponent(String(q.headers['x-title'] || '')); } catch { /* ignore */ } r.status(201).json(publicJob(await startLyricJob(q.user._id, title, Buffer.isBuffer(q.body) ? q.body : null))); }));
+app.post('/api/videos/amv', auth, express.raw({ type: () => true, limit: '15mb' }), wrap(async (q, r) => { if (!imageEnabled()) throw bad('Video is not configured.'); if (q.user.isGuest) throw bad('Create an account first.', 403); const h = k => { try { return decodeURIComponent(String(q.headers[k] || '')); } catch { return ''; } }; const animeUrl = h('x-anime-url'); if (!animeUrl) throw bad('Send the anime video link (x-anime-url header), a direct public mp4/mkv URL.', 400); await assertPublicUrl(animeUrl).catch(e => { throw bad(e.message, 400); }); r.status(201).json(publicJob(await startAmvJob(q.user._id, h('x-title'), Buffer.isBuffer(q.body) ? q.body : null, animeUrl, h('x-anime-title')))); }));
 app.post('/api/videos/:id/remake', auth, wrap(async (q, r) => {
   const job = await VideoJob.findOne({ _id: q.params.id, userId: q.user._id }); if (!job) throw bad('No such video.', 404);
   if (!imageEnabled()) throw bad('Video is not configured.');

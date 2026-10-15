@@ -10,6 +10,7 @@ import ffmpegPath from 'ffmpeg-static';
 import { chatCompletion } from './llm.js';
 import { hordePanel, geminiTTS } from './pipelines/providers.js';
 import { generateClip, generateSpeech, generateSpeechEL, generateAgnesClip, generateImage, generateImageCF, generateImageGemini, generateWithReference, generateInbetweens, transcribeSong } from './media.js';
+import { buildLyricsAss, headerEvent, probeDuration as probeDur, buildTrack, renderArgs as amvRenderArgs, mapTiming, pickCuts } from './pipelines/amv.js';
 const { Schema, model } = mongoose; const run = promisify(execFile);
 
 // Banned visual subjects: never query them and never ship them, whatever the niche.
@@ -37,6 +38,7 @@ export const VideoJob = model('VideoJob', new Schema({
   userId: { type: Schema.Types.ObjectId, index: true }, topic: String, title: { type: String, default: '' },
   status: { type: String, default: 'queued', index: true }, // queued, scripting, clips, stitching, done, failed
   scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, manhwa: { type: Boolean, default: false }, panels: { type: Boolean, default: false }, story: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, locDesc: { type: String, default: '' }, panelStats: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, landscape: { type: Boolean, default: false }, startedAt: Date, fileDeletedAt: Date,
+  amv: { type: Boolean, default: false }, animeUrl: { type: String, default: '' },
   lockUntil: { type: Date, default: null }, bytes: { type: Number, default: 0 }, voiceVia: { type: String, default: '' },
 }, { timestamps: true }));
 export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer, gen: { type: Boolean, default: false } }, { timestamps: true }));
@@ -96,6 +98,14 @@ export async function startLyricJob(userId, title, buf) {
   const job = await startJob(userId, String(title || 'Lyric video').slice(0, 120) || 'Lyric video', false);
   job.lyric = true; await job.save(); await VideoBlob.create({ jobId: job._id, kind: 'song', idx: 0, data: buf }); return job;
 }
+export async function startAmvJob(userId, title, buf, animeUrl, animeTitle) {
+  if (!buf?.length || buf.length < 20000) throw Object.assign(new Error('Send a song file (mp3, m4a or wav).'), { status: 400 });
+  if (buf.length > 14e6) throw Object.assign(new Error('Song file is too big. Use one under 14 MB.'), { status: 413 });
+  if (!animeUrl) throw Object.assign(new Error('Send the anime video link.'), { status: 400 });
+  const job = await startJob(userId, String(title || 'AMV').slice(0, 120) || 'AMV', false);
+  job.amv = true; job.subject = String(animeTitle || '').slice(0, 120); job.animeUrl = animeUrl; await job.save();
+  await VideoBlob.create({ jobId: job._id, kind: 'song', idx: 0, data: buf }); return job;
+}
 export async function startLyricSelftest(userId) {
   const r = await fetch('https://archive.org/download/HighlandBaptistChurchChoirAmazingGrace/Amazing_Grace_Acapella_vbr.mp3', { redirect: 'follow', signal: AbortSignal.timeout(60000) }); if (!r.ok) throw new Error('Test song not reachable.');
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-t-')); try { const a = path.join(dir, 'a.mp3'), b = path.join(dir, 'b.mp3'); await fs.writeFile(a, Buffer.from(await r.arrayBuffer())); await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', a, '-t', '36', '-b:a', '96k', b], { timeout: 60000 }); return await startLyricJob(userId, 'Amazing Grace (Highland Baptist Church Choir, CC BY 2.5)', await fs.readFile(b)); } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
@@ -110,6 +120,26 @@ const assTime = t => { t = Math.max(0, t); const h = Math.floor(t / 3600), m = M
 function assFile(text, a, b, pw = W, ph = H) {
   const dev = /[\u0900-\u097F]/.test(text); const clean = String(text).replace(/[{}\\]/g, '').replace(/\s+/g, ' ').trim(); const fsz = pw > ph ? 32 : 40, mv = Math.round(ph * 0.08);
   return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${pw}\nPlayResY: ${ph}\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Default,${dev ? 'Noto Sans Devanagari' : 'Noto Sans'},${fsz},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,24,24,${mv},1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\nDialogue: 0,${assTime(a)},${assTime(b)},Default,,0,0,0,,${clean}\n`;
+}
+const MAX_AMV_DUR = 390; // seconds, free-plan guard
+async function amvPrepare(job) {
+  let song = null; for (let k = 0; k < 8 && !song; k++) { song = await VideoBlob.findOne({ jobId: job._id, kind: 'song' }); if (!song) await new Promise(r => setTimeout(r, 2500)); } if (!song) throw new Error('The song file is missing.');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-a-'));
+  try {
+    job.stage = 'Listening to the song'; await job.save();
+    const src = path.join(dir, 'song.bin'), small = path.join(dir, 'small.mp3'); await fs.writeFile(src, await blobBytes(song));
+    const dur0 = await probeDur(src); if (!dur0) throw new Error('Could not read the song file.');
+    if (dur0 > MAX_AMV_DUR) throw new Error(`Song is ${Math.round(dur0 / 60)} minutes - AMV mode takes songs up to ${MAX_AMV_DUR / 60} minutes on the free plan.`);
+    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', src, '-ac', '1', '-ar', '16000', '-b:a', '48k', small], { timeout: 90000 });
+    job.songDur = dur0;
+    const { segments } = await transcribeSong(await fs.readFile(small));
+    if (!segments.length) throw new Error('I could not hear any lyrics in this song.');
+    const { lines, instrumentals, flags } = mapTiming(segments.map(g => ({ start: g.t0, end: g.t1, text: g.text })), dur0);
+    if (!lines.length) throw new Error('I could not hear any lyrics in this song.');
+    job.scenes = lines.map(l => ({ act: '', prompt: '', kw: '', say: l.text, state: 'ok', t0: l.start, t1: l.end }));
+    job.note = `${lines.length} lyric lines${instrumentals.length ? `, ${instrumentals.length} instrumental gap${instrumentals.length > 1 ? 's' : ''} (no lyrics shown there)` : ''}${flags.length ? ' · check: ' + flags.map(f => f.kind).join(', ') : ''}`;
+    job.status = 'stitching'; job.stage = 'Preparing the anime clips'; await job.save();
+  } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
 async function lyricScript(job) {
   let song = null; for (let k = 0; k < 8 && !song; k++) { song = await VideoBlob.findOne({ jobId: job._id, kind: 'song' }); if (!song) await new Promise(r => setTimeout(r, 2500)); } if (!song) throw new Error('The song file is missing.');
@@ -501,6 +531,7 @@ async function makeScene(job, i) {
   job.scenes[i].state = 'ok'; await job.save();
 }
 async function step(job) {
+  if (job.amv && (job.status === 'queued' || job.status === 'scripting')) { job.status = 'scripting'; await job.save(); return amvPrepare(job); }
   if (job.lyric && (job.status === 'queued' || job.status === 'scripting')) { job.status = 'scripting'; await job.save(); return lyricScript(job); }
   if (job.status === 'queued' || job.status === 'scripting') { job.status = 'scripting'; job.stage = job.long ? 'Planning the story' : 'Writing the script'; await job.save(); return script(job); }
   if (job.status === 'clips') {
@@ -518,7 +549,30 @@ async function step(job) {
     }
     return;
   }
-  if (job.status === 'stitching') return job.lyric ? stitchLyric(job) : stitch(job);
+  if (job.status === 'stitching') return job.amv ? stitchAmv(job) : job.lyric ? stitchLyric(job) : stitch(job);
+}
+async function stitchAmv(job) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-m-'));
+  try {
+    const fd = await fontsDir(); const song = await VideoBlob.findOne({ jobId: job._id, kind: 'song' }); if (!song) throw new Error('The song file is missing.');
+    const sf = path.join(dir, 'song.bin'); await fs.writeFile(sf, await blobBytes(song));
+    const dur = job.songDur || await probeDur(sf); if (!dur) throw new Error('Could not read the song file.');
+    job.stage = 'Reading the anime source'; await job.save().catch(() => {});
+    const srcDur = await probeDur(job.animeUrl); if (!srcDur || srcDur < dur * 0.5) throw new Error('The anime link did not look like a video. Use a direct mp4/mkv link (for example an archive.org download link).');
+    const cuts = pickCuts(srcDur, dur);
+    const track = await buildTrack(job.animeUrl, cuts, dir, null, async (i, n) => { job.stage = `Cutting anime clip ${i} of ${n}`; await job.save().catch(() => {}); });
+    const head = (job.topic + (job.subject ? `  |  ${job.subject}` : '')).replace(/[{}\\]/g, '');
+    const ass = buildLyricsAss(job.scenes.map(s => ({ start: s.t0, end: s.t1, text: s.say }))) + headerEvent(head) + '\n';
+    const af = path.join(dir, 'lyrics.ass'); await fs.writeFile(af, ass);
+    job.stage = 'Mixing song and lyrics'; await job.save().catch(() => {});
+    const out = path.join(dir, 'out.mp4');
+    await run(ffmpegPath, amvRenderArgs(track, sf, af, out, dur, fd), { timeout: 1500000 });
+    const data = await fs.readFile(out);
+    await VideoBlob.deleteMany({ jobId: job._id, kind: 'final' }); for (let p = 0; p * 7e6 < data.length; p++) await VideoBlob.create({ jobId: job._id, kind: 'final', idx: p, data: data.subarray(p * 7e6, (p + 1) * 7e6) });
+    sweepBlobs(400).catch(e => console.error('sweep-after-stitch', e.message));
+    job.bytes = data.length; job.status = 'done';
+    job.note = `AMV: ${job.scenes.length} lyric lines (word-by-word reveal), anime clips from one source, full song, 1080p landscape${job.note ? ' · ' + job.note : ''}`; await job.save();
+  } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
 let busy = false;
 async function tick() {
