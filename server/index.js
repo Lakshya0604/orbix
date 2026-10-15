@@ -368,6 +368,7 @@ app.get('/api/videos/:id/file', auth, wrap(async (q, r) => {
   if (q.query.dl === '1') r.on('finish', () => removeJobFiles(job._id).catch(e => console.error('dl-clean', e.message)));
   r.set({ 'content-type': 'video/mp4', 'content-length': data.length, 'cache-control': 'private, max-age=3600' }).send(data);
 }));
+app.get('/api/videos/:id/thumb', auth, wrap(async (q, r) => { const job = await VideoJob.findOne({ _id: q.params.id, userId: q.user._id }); if (!job) throw bad('No such video.', 404); const b = await VideoBlob.findOne({ jobId: job._id, kind: 'thumb' }); if (!b) throw bad('No thumbnail yet.', 404); r.set({ 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=3600' }).send(await blobBytes(b)); }));
 app.delete('/api/videos/:id', auth, wrap(async (q, r) => { const job = await VideoJob.findOneAndDelete({ _id: q.params.id, userId: q.user._id }); if (job) await removeJobFiles(job._id); r.json({ ok: true }); }));
 // end-to-end self-test of the Short pipeline with a system user (runs once per hour at most, no secrets in the answer)
 const HEALTH_KEY = process.env.HEALTH_KEY || '';

@@ -10,7 +10,8 @@ import ffmpegPath from 'ffmpeg-static';
 import { chatCompletion } from './llm.js';
 import { hordePanel, geminiTTS } from './pipelines/providers.js';
 import { generateClip, generateSpeech, generateSpeechEL, generateAgnesClip, generateImage, generateImageCF, generateImageGemini, generateWithReference, generateInbetweens, transcribeSong } from './media.js';
-import { buildLyricsAss, headerEvent, probeDuration as probeDur, buildTrack, renderArgs as amvRenderArgs, mapTiming, pickCuts } from './pipelines/amv.js';
+import { buildLyricsAss, headerEvent, probeDuration as probeDur, buildTrack, renderArgs as amvRenderArgs, mapTiming, pickCuts, buildThumb } from './pipelines/amv.js';
+import { amvYoutubeUpload } from './amv-upload.js';
 const { Schema, model } = mongoose; const run = promisify(execFile);
 
 // Banned visual subjects: never query them and never ship them, whatever the niche.
@@ -570,8 +571,11 @@ async function stitchAmv(job) {
     const data = await fs.readFile(out);
     await VideoBlob.deleteMany({ jobId: job._id, kind: 'final' }); for (let p = 0; p * 7e6 < data.length; p++) await VideoBlob.create({ jobId: job._id, kind: 'final', idx: p, data: data.subarray(p * 7e6, (p + 1) * 7e6) });
     sweepBlobs(400).catch(e => console.error('sweep-after-stitch', e.message));
+    try { const tf = path.join(dir, 'thumb.jpg'); await buildThumb(track, dur / 2, job.topic, `${job.subject || 'Anime'} AMV`, tf, fd); await VideoBlob.deleteMany({ jobId: job._id, kind: 'thumb' }); await VideoBlob.create({ jobId: job._id, kind: 'thumb', idx: 0, data: await fs.readFile(tf) }); } catch (e) { console.error('amv thumb', e.message.slice(0, 120)); }
     job.bytes = data.length; job.status = 'done';
-    job.note = `AMV: ${job.scenes.length} lyric lines (word-by-word reveal), anime clips from one source, full song, 1080p landscape${job.note ? ' · ' + job.note : ''}`; await job.save();
+    job.note = `AMV: ${job.scenes.length} lyric lines (word-by-word reveal), anime clips from one source, full song, 1080p landscape${job.note ? ' · ' + job.note : ''}`;
+    try { const link = await amvYoutubeUpload(data, job); if (link) job.note += ` · Uploaded: ${link}`; } catch (e) { console.error('amv upload', e.message.slice(0, 140)); job.note += ' · YouTube upload failed (video is still downloadable here)'; }
+    await job.save();
   } finally { fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
 let busy = false;

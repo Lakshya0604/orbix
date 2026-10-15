@@ -158,3 +158,39 @@ export function pickCuts(srcDur, total, { n = 24, head = 45, tail = 45 } = {}) {
   }
   return cuts;
 }
+
+// ---- Thumbnail (ffmpeg-only; ffmpeg-static has libass but no drawtext) ----
+// One bright-ish frame + dark band + Devanagari title (libass shaping) + orange EN subtitle.
+export function buildThumbAss(title, sub) {
+  const clean = t => String(t || '').replace(/[{}\\]/g, '').replace(/\s+/g, ' ').trim();
+  return `[Script Info]
+ScriptType: v4.00+
+PlayResX: 1280
+PlayResY: 720
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: T,${LYRIC_FONT},64,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,2,2,40,40,205,1
+Style: S,${HEAD_FONT},30,&H0000A5FF,&H0000A5FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,1,2,40,40,120,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:02.00,T,,0,0,0,,${clean(title)}
+Dialogue: 0,0:00:00.00,0:00:02.00,S,,0,0,0,,${clean(sub)}
+`;
+}
+
+export function thumbArgs(src, atSec, assPath, out, fontsDir = FONT_DIR) {
+  const vf = `scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,drawbox=x=0:y=ih*0.55:w=iw:h=ih*0.45:color=black@0.5:t=fill,subtitles=${assPath}:fontsdir=${fontsDir}`;
+  return ['-y', '-loglevel', 'error', '-ss', String(atSec), '-t', '2', '-i', src, '-vf', vf, '-frames:v', '1', '-q:v', '3', out];
+}
+
+export async function buildThumb(src, atSec, title, sub, out, fontsDir = FONT_DIR) {
+  const assPath = out.replace(/\.[^.]+$/, '') + '.ass';
+  await fs.writeFile(assPath, buildThumbAss(title, sub));
+  await run(ffmpegPath, thumbArgs(src, atSec, assPath, out, fontsDir), { timeout: 120000 });
+  const st = await fs.stat(out); if (!st.size) throw new Error('buildThumb: empty output');
+  return out;
+}
