@@ -58,20 +58,30 @@ async function wikiVerify(f) {
   const query = [f.claim, ...kws.slice(1)].filter(Boolean).join(' ').slice(0, 220);
   const api = 'https://en.wikipedia.org/w/api.php';
   const hdr = { 'user-agent': 'OrbixFacts/1.0 (fact-check; contact: site owner)' };
-  const sr = await fetch(`${api}?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&srlimit=3`, { headers: hdr, signal: AbortSignal.timeout(20000) });
-  if (!sr.ok) return { ok: false, why: `wiki search ${sr.status}` };
-  const sj = await sr.json();
-  const hits = sj?.query?.search || [];
+  let hits = [];
+  for (const q2 of [query, kws.slice(1).join(' ')].filter(Boolean)) {
+    let sr = null;
+    for (let a = 0; a < 3; a++) {
+      sr = await fetch(`${api}?action=query&list=search&srsearch=${encodeURIComponent(q2)}&format=json&srlimit=3`, { headers: hdr, signal: AbortSignal.timeout(20000) }).catch(() => null);
+      if (sr && sr.status === 429) { await new Promise(r => setTimeout(r, 4000 * (a + 1))); continue; }
+      break;
+    }
+    if (sr && sr.ok) { hits = (await sr.json())?.query?.search || []; if (hits.length) break; }
+    await new Promise(r => setTimeout(r, 800));
+  }
+  if (!hits.length) return { ok: false, why: 'wiki search empty' };
   for (const h of hits.slice(0, 3)) {
     const title = h.title;
+    await new Promise(r => setTimeout(r, 700));
     const er = await fetch(`${api}?action=query&prop=extracts%7Cextlinks&explaintext=1&exlimit=1&ellimit=200&titles=${encodeURIComponent(title)}&format=json`, { headers: hdr, signal: AbortSignal.timeout(25000) });
+    if (er.status === 429) { await new Promise(r => setTimeout(r, 5000)); continue; }
     if (!er.ok) continue;
     const ej = await er.json();
     const page = Object.values(ej?.query?.pages || {})[0] || {};
     const flat = String(page.extract || '').toLowerCase().replace(/[,\u00a0]/g, '');
     const low = String(page.extract || '').toLowerCase();
     const numOk = numMatch(flat, kws[0]);
-    const kwOk = kws.slice(1).filter(k => k.length > 2).filter(k => low.includes(k.toLowerCase())).length >= Math.min(2, kws.slice(1).filter(k => k.length > 2).length || 1);
+    const kwOk = kws.slice(1).filter(k => k.length > 2).filter(k => low.includes(k.toLowerCase())).length >= Math.min(1, kws.slice(1).filter(k => k.length > 2).length || 1);
     if (!(numOk && kwOk)) continue;
     // fact verified on Wikipedia; try to upgrade the citation to a primary external link on the page
     const links = (page.extlinks || []).map(x => String(x['*'] || ''));
