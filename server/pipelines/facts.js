@@ -27,9 +27,9 @@ const fontFor = s => (hasDev(s) ? 'Noto Sans Devanagari' : 'Noto Sans');
 const SCRIPT_SYS = `You write a Hindi YouTube Shorts FACTS video script (48-60 seconds spoken). Reply ONLY valid JSON, no double quotes inside values.
 Shape: {"strip":"...","fiction":false,"scenes":[{"say":"...","kw":"...","emoji":"...","visual":"...","badge":"1","claim":"...","url":"...","evidence":"..."}]}
 Rules:
-- Exactly 7 scenes. Scene 1 = hook (badge empty, no claim/url). Scenes 2-6 = five numbered facts (badge "1".."5"). Scene 7 = ending: ask viewers to comment their favourite fact number and follow (badge empty, no claim/url).
-- "strip" = short Hindi top-bar title, e.g. "अंतरिक्ष के 5 चौंकाने वाले सच". If the topic is fiction, set fiction true and start the strip with "(काल्पनिक)".
-- "say" = spoken Hindi in Devanagari. LENGTH MATTERS: hook 12-18 words and must grab instantly; each fact scene 2 full sentences of 18-26 words total (state the fact with its number, then why it is amazing); ending 12-18 words. Total spoken words across all 7 scenes must be 115-150 (about 45-58 seconds). Number facts with "नंबर एक/दो/तीन/चार/पांच". Simple words, energetic.
+- Exactly 10 scenes. Scene 1 = hook (badge empty, no claim/url). Scenes 2-9 = EIGHT candidate numbered facts (badge "1".."8"); only the 5 that verify will be used, so make all 8 strong. Scene 10 = ending: ask viewers to comment their favourite fact number and follow (badge empty, no claim/url).
+- "strip" = short Hindi top-bar title, e.g. "अंतरिक्ष के 5 चौंकाने वाले सच (strip ka number final kept facts se badal diya jayega)". If the topic is fiction, set fiction true and start the strip with "(काल्पनिक)".
+- "say" = spoken Hindi in Devanagari. LENGTH MATTERS: hook 12-18 words and must grab instantly; each fact scene 2 full sentences of 18-26 words total (state the fact with its number, then why it is amazing); ending 12-18 words. Each fact scene must be 18-26 spoken words; hook 12-18; ending 12-18 (about 45-58 seconds). Number facts with "नंबर एक/दो/तीन/चार/पांच". Simple words, energetic.
 - "kw" = keyword box, TWO lines separated by \\n: line 1 = the headline number/word in Hindi (max 3 words, MUST contain the fact number in digits, e.g. "243 दिन"), line 2 = short kicker in Hindi (max 3 words, e.g. "साल 225 दिन"). For hook and ending scenes kw can be empty.
 - "emoji" = exactly one unicode emoji matching the scene.
 - "visual" = ONE English sentence describing a vivid illustration of THIS line (objects/places/phenomena only - never any person, human, face or character; no text in image).
@@ -116,19 +116,19 @@ export async function factsScript(job, VideoJob) {
     try {
       const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}` }] });
       const j = jsonOf(m.content);
-      if (j && Array.isArray(j.scenes) && j.scenes.length >= 6) spec = j;
+      if (j && Array.isArray(j.scenes) && j.scenes.length >= 8) spec = j;
     } catch (e) { await new Promise(r => setTimeout(r, 6000 * (a + 1))); }
   }
   if (!spec) throw new Error('Could not write the facts script. Please try again.');
-  spec.scenes = spec.scenes.slice(0, 7);
+  spec.scenes = spec.scenes.slice(0, 10);
   // Too-short scripts make a 15-second video; ask once for a fuller cut.
-  const wc = () => spec.scenes.reduce((n, x) => n + String(x.say || '').split(/\s+/).filter(Boolean).length, 0);
-  for (let a = 0; a < 2 && wc() < 95; a++) {
+  const wc = () => { const sc = spec.scenes; const pick = [sc[0], ...sc.slice(1, 6), sc[sc.length - 1]].filter(Boolean); return pick.reduce((n, x) => n + String(x.say || '').split(/\s+/).filter(Boolean).length, 0); };
+  for (let a = 0; a < 2 && wc() < 100; a++) {
     try {
-      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}\nYour previous draft was only ${wc()} spoken words - far too short. Rewrite the FULL script with 115-150 spoken words total; every fact scene needs 2 full sentences. Keep the same facts and sources.` }] });
+      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}\nYour previous draft was only ${wc()} spoken words - far too short. Rewrite the FULL script (hook + 8 candidate facts + ending); every fact scene needs 2 full sentences of 18-26 words. Keep the same facts and sources.` }] });
       const j = jsonOf(m.content);
-      if (j && Array.isArray(j.scenes) && j.scenes.length >= 6) {
-        const oldWc = wc(); const cand = j; cand.scenes = cand.scenes.slice(0, 7);
+      if (j && Array.isArray(j.scenes) && j.scenes.length >= 8) {
+        const oldWc = wc(); const cand = j; cand.scenes = cand.scenes.slice(0, 10);
         const candWc = cand.scenes.reduce((n, x) => n + String(x.say || '').split(/\s+/).filter(Boolean).length, 0);
         if (candWc > oldWc) spec = cand;
       }
@@ -147,8 +147,8 @@ export async function factsScript(job, VideoJob) {
       for (let k = 0; k < reps.length; k++) { let v = await verifyFact(reps[k]); if (!v.ok) { const w = await wikiVerify(reps[k]).catch(() => ({ ok: false })); if (w.ok) { reps[k].url = w.url; v = { ok: true }; } } if (v.ok) Object.assign(failed[k].s, reps[k], { _verified: true }); }
     } catch { /* keep originals dropped below */ }
   }
-  const keptFacts = factIdx.filter(x => x.s._verified);
-  if (keptFacts.length < 3) { job.note = 'verify failed: ' + failed.map(f => `${(f.s.url || '').slice(0, 60)}=${f.why}`).join(' | ').slice(0, 480); await job.save().catch(() => {}); throw new Error('Could not verify at least 3 facts against their sources. Try a different topic.'); }
+  const keptFacts = factIdx.filter(x => x.s._verified).slice(0, 5);
+  if (keptFacts.length < 4) { job.note = 'verify failed: ' + failed.map(f => `${(f.s.url || '').slice(0, 60)}=${f.why}`).join(' | ').slice(0, 480); await job.save().catch(() => {}); throw new Error('Could not verify at least 4 facts against their sources. Try a different topic.'); }
   const keepIdx = new Set([0, spec.scenes.length - 1, ...keptFacts.map(x => x.i)]);
   const scenes = spec.scenes.filter((s, i) => keepIdx.has(i));
   // Renumber badges 1..N in kept order.
