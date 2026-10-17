@@ -161,8 +161,7 @@ export async function factsScript(job, VideoJob) {
   // kw accuracy pass: the box must match the fact exactly (units, numbers) - a wrong unit on screen is worse than no box.
   try {
     const askKw = keptFacts.map((x, k) => `${k + 1}. claim: ${x.s.claim}
-   kw: ${String(x.s.kw || '').replace(/\n/g, ' / ')}`).join('
-');
+   kw: ${String(x.s.kw || '').replace(/\n/g, ' / ')}`).join('\n');
     const mk = await chatCompletion({ tools: [], messages: [{ role: 'system', content: 'You fact-check the on-screen keyword box of a Hindi facts Short against the verified claim. For EACH item return {"fixes":[{"i":1,"kw":"line1\nline2"}]} - only for items where the kw text is inaccurate (wrong number, wrong unit like घंटे vs दिन, wrong object) or uses the list position as its number. line1 = the headline number+unit FROM THE CLAIM (max 3 words, digits), line2 = short kicker (max 3 words). If an item is already accurate, omit it. Never invent a number not in the claim.' }, { role: 'user', content: askKw }] });
     const jk = jsonOf(mk.content);
     for (const f of (jk && Array.isArray(jk.fixes) ? jk.fixes : [])) { const idx = (f.i | 0) - 1; if (idx >= 0 && idx < keptFacts.length && f.kw) keptFacts[idx].s.kw = String(f.kw).slice(0, 60); }
