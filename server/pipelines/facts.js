@@ -145,16 +145,21 @@ async function semanticVerify(kept) {
     await new Promise(r => setTimeout(r, 400));
   }
   if (!items.length) return new Set();
+  for (let attempt = 0; attempt < 2; attempt++) {
   try {
     const m = await chatCompletion({ tools: [], messages: [
       { role: 'system', content: 'You are a strict fact checker for a Hindi facts video. For each item decide whether the SOURCE explicitly supports the CLAIM: the exact number with the exact unit AND the exact subject must match (58 minutes vs 243 days is a FAIL; a number that appears about a different planet is a FAIL; unit mismatches like hours vs days are a FAIL). ALSO fail the item when the SAY (spoken Hindi) states a DIFFERENT fact than the CLAIM: a changed number, a flipped comparison (e.g. 99.86 percent of total mass spoken as 99.86 percent MORE than the other planets), a missing or wrong percentage base, or a NEW specific scientific cause/mechanism the source does not support (e.g. claiming gas density vibrations turn into electromagnetic waves). Generic awe phrases and widely-known context ("ye hairan kar deta hai", "dimag hila dene wala", "isliye raat ko tare chamakte dikhte hain") are FINE - fail only factual distortions, never style. Return ONLY {"verdicts":[{"i":1,"ok":true}]}; include every item.' },
       { role: 'user', content: JSON.stringify(items) }] });
     const j = jsonOf(m.content);
-    const okSet = new Set((j && Array.isArray(j.verdicts) ? j.verdicts : []).filter(v => v && v.ok).map(v => v.i | 0));
+    const verdicts = (j && Array.isArray(j.verdicts)) ? j.verdicts : [];
+    if (!verdicts.length) { console.error('facts judge empty/unparseable, attempt', attempt); continue; } // retry once; never nuke all facts on a judge hiccup
+    const okSet = new Set(verdicts.filter(v => v && v.ok).map(v => v.i | 0));
     const bad = new Set();
     for (const it of items) if (!okSet.has(it.i)) bad.add(it.i - 1);
     return bad;
-  } catch { return new Set(); }
+  } catch { /* retry, then skip */ }
+  }
+  return new Set(); // judge unavailable twice: keep substring+wiki-verified facts rather than fail the job
 }
 
 export async function factsScript(job, VideoJob) {
