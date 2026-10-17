@@ -27,13 +27,13 @@ const fontFor = s => (hasDev(s) ? 'Noto Sans Devanagari' : 'Noto Sans');
 const SCRIPT_SYS = `You write a Hindi YouTube Shorts FACTS video script (48-60 seconds spoken). Reply ONLY valid JSON, no double quotes inside values.
 Shape: {"strip":"...","fiction":false,"scenes":[{"say":"...","kw":"...","emoji":"...","visual":"...","badge":"1","claim":"...","url":"...","evidence":"..."}]}
 Rules:
-- Exactly 10 scenes. Scene 1 = hook (badge empty, no claim/url). Scenes 2-9 = EIGHT candidate numbered facts (badge "1".."8"); only the 5 that verify will be used, so make all 8 strong. Scene 10 = ending: ask viewers to comment their favourite fact number and follow (badge empty, no claim/url).
+- Exactly 14 scenes. Scene 1 = hook (badge empty, no claim/url). Scenes 2-13 = TWELVE candidate numbered facts (badge "1".."12"); only the 5 that verify will be used, so make all 12 strong. Scene 14 = ending: ask viewers to comment their favourite fact number and follow (badge empty, no claim/url).
 - "strip" = short Hindi top-bar title, e.g. "अंतरिक्ष के 5 चौंकाने वाले सच (strip ka number final kept facts se badal diya jayega)". If the topic is fiction, set fiction true and start the strip with "(काल्पनिक)".
 - "say" = spoken Hindi in Devanagari. LENGTH MATTERS: hook 12-18 words and must grab instantly; each fact scene 2-3 full sentences of 24-32 words total (state the fact with its number, then why it is amazing); ending 12-18 words. Each fact scene must be 24-32 spoken words; hook 12-18; ending 12-18 (about 45-58 seconds). NEVER speak fact numbers (no "नंबर एक/दो/तीन" etc.) - an on-screen badge already shows the number; state each fact directly. Simple words, energetic.
 - "kw" = keyword box, TWO lines separated by \\n: line 1 = the headline number/word in Hindi (max 3 words, MUST contain a number in digits taken FROM THE FACT ITSELF, e.g. "243 दिन"), line 2 = short kicker in Hindi (max 3 words, e.g. "साल 225 दिन"). For hook and ending scenes kw can be empty. NEVER use the fact list position (1,2,3,4,5) as that number - the badge already shows the position.
 - "emoji" = exactly one unicode emoji matching the scene.
 - "visual" = ONE English sentence describing a vivid illustration of THIS line (objects/places/phenomena only - never any person, human, face or character; no text in image).
-- For the 4 fact scenes: "claim" = the key checkable statement, "url" = a primary or authoritative source page (NASA, Britannica, Smithsonian, NIH/NCBI, NCERT, official museum or government sites). Prefer deep stable article pages (e.g. britannica.com/place/Venus-planet, science.nasa.gov/venus/venus-facts), never homepages or search pages, and only URLs you are highly confident exist, "evidence" = the exact number as digits then | then 2-3 English keywords that must appear on that page (e.g. "243|Venus|rotation|day"). Facts must be real, current, non-political, non-religious.`;
+- For the 4 fact scenes: "claim" = the key checkable statement, "url" = a primary or authoritative source page (NASA, Britannica, Smithsonian, NIH/NCBI, NCERT, official museum or government sites). Prefer stable en.wikipedia.org article URLs you are highly confident exist (most reliable for verification), then deep stable primary article pages (e.g. britannica.com/place/Venus-planet, science.nasa.gov/venus/venus-facts), never homepages or search pages, and only URLs you are highly confident exist, "evidence" = the exact number as digits then | then 2-3 English keywords that must appear on that page (e.g. "243|Venus|rotation|day"). Facts must be real, current, non-political, non-religious.`;
 
 async function fetchPage(u) {
   const UAS = ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36', 'Mozilla/5.0 (compatible; OrbixFacts/1.0)'];
@@ -165,15 +165,15 @@ export async function factsScript(job, VideoJob) {
     } catch (e) { await new Promise(r => setTimeout(r, 6000 * (a + 1))); }
   }
   if (!spec) throw new Error('Could not write the facts script. Please try again.');
-  spec.scenes = spec.scenes.slice(0, 10);
+  spec.scenes = spec.scenes.slice(0, 14);
   // Too-short scripts make a 15-second video; ask once for a fuller cut.
   const wc = () => { const sc = spec.scenes; const pick = [sc[0], ...sc.slice(1, 6), sc[sc.length - 1]].filter(Boolean); return pick.reduce((n, x) => n + String(x.say || '').split(/\s+/).filter(Boolean).length, 0); };
   for (let a = 0; a < 2 && wc() < 100; a++) {
     try {
-      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}\nYour previous draft was only ${wc()} spoken words - far too short. Rewrite the FULL script (hook + 8 candidate facts + ending); every fact scene needs 2-3 full sentences of 24-32 words. Keep the same facts and sources.` }] });
+      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}\nYour previous draft was only ${wc()} spoken words - far too short. Rewrite the FULL script (hook + 12 candidate facts + ending); every fact scene needs 2-3 full sentences of 24-32 words. Keep the same facts and sources.` }] });
       const j = jsonOf(m.content);
       if (j && Array.isArray(j.scenes) && j.scenes.length >= 8) {
-        const oldWc = wc(); const cand = j; cand.scenes = cand.scenes.slice(0, 10);
+        const oldWc = wc(); const cand = j; cand.scenes = cand.scenes.slice(0, 14);
         const candWc = cand.scenes.reduce((n, x) => n + String(x.say || '').split(/\s+/).filter(Boolean).length, 0);
         if (candWc > oldWc) spec = cand;
       }
