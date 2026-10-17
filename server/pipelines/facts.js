@@ -158,6 +158,15 @@ export async function factsScript(job, VideoJob) {
     } catch { /* keep originals dropped below */ }
   }
   const keptFacts = factIdx.filter(x => x.s._verified).slice(0, 5);
+  // kw accuracy pass: the box must match the fact exactly (units, numbers) - a wrong unit on screen is worse than no box.
+  try {
+    const askKw = keptFacts.map((x, k) => `${k + 1}. claim: ${x.s.claim}
+   kw: ${String(x.s.kw || '').replace(/\n/g, ' / ')}`).join('
+');
+    const mk = await chatCompletion({ tools: [], messages: [{ role: 'system', content: 'You fact-check the on-screen keyword box of a Hindi facts Short against the verified claim. For EACH item return {"fixes":[{"i":1,"kw":"line1\nline2"}]} - only for items where the kw text is inaccurate (wrong number, wrong unit like घंटे vs दिन, wrong object) or uses the list position as its number. line1 = the headline number+unit FROM THE CLAIM (max 3 words, digits), line2 = short kicker (max 3 words). If an item is already accurate, omit it. Never invent a number not in the claim.' }, { role: 'user', content: askKw }] });
+    const jk = jsonOf(mk.content);
+    for (const f of (jk && Array.isArray(jk.fixes) ? jk.fixes : [])) { const idx = (f.i | 0) - 1; if (idx >= 0 && idx < keptFacts.length && f.kw) keptFacts[idx].s.kw = String(f.kw).slice(0, 60); }
+  } catch { /* keep original kw */ }
   if (keptFacts.length < 4) { job.note = 'verify failed: ' + failed.map(f => `${(f.s.url || '').slice(0, 60)}=${f.why}`).join(' | ').slice(0, 480); await job.save().catch(() => {}); throw new Error('Could not verify at least 4 facts against their sources. Try a different topic.'); }
   const keepIdx = new Set([0, spec.scenes.length - 1, ...keptFacts.map(x => x.i)]);
   const scenes = spec.scenes.filter((s, i) => keepIdx.has(i));
@@ -322,7 +331,7 @@ export async function factsStitch(job, { VideoJob, VideoBlob, blobBytes, fontsDi
     }
     total = await durOf(voiceFile);
     if (!total) throw new Error('The voice track is empty.');
-    if (total > 58) { const t = Math.min(1.3, total / 52); const sped = path.join(dir, 'voice_fast.wav'); try { await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', voiceFile, '-af', `atempo=${t.toFixed(3)}`, sped], { timeout: 120000 }); const nd = await durOf(sped); if (nd && nd < total) { voiceFile = sped; total = nd; job.note = `voice sped atempo=${t.toFixed(2)}`; } } catch (e) { console.error('facts speedup', String(e.message).slice(0, 100)); } }
+    if (total > 58) { const t = Math.min(1.45, total / 51); const sped = path.join(dir, 'voice_fast.wav'); try { await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', voiceFile, '-af', `atempo=${t.toFixed(3)}`, sped], { timeout: 120000 }); const nd = await durOf(sped); if (nd && nd < total) { voiceFile = sped; total = nd; job.note = `voice sped atempo=${t.toFixed(2)}`; } } catch (e) { console.error('facts speedup', String(e.message).slice(0, 100)); } }
     if (total < 45) { const t = Math.max(0.8, total / 46); const stretched = path.join(dir, 'voice_slow.wav'); try { await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', voiceFile, '-af', `atempo=${t.toFixed(3)}`, stretched], { timeout: 120000 }); const nd = await durOf(stretched); if (nd && nd > total) { voiceFile = stretched; total = nd; job.note = `voice stretched atempo=${t.toFixed(2)}`; } } catch (e) { console.error('facts stretch', String(e.message).slice(0, 100)); } }
     // scene boundaries: weight by spoken words, snap to silences
     const sd = await run(ffmpegPath, ['-i', voiceFile, '-af', 'silencedetect=noise=-33dB:d=0.12', '-f', 'null', '-'], { timeout: 60000 }).catch(e => ({ stderr: e.stderr || '' }));
