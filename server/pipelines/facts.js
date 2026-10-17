@@ -48,6 +48,49 @@ async function fetchPage(u) {
   }
   throw new Error(last || 'fetch failed');
 }
+
+const PRIMARY_HOSTS = ['nasa.gov', 'britannica.com', 'si.edu', 'smithsonian', 'nih.gov', 'ncbi.nlm.nih.gov', 'nist.gov', 'noaa.gov', 'usgs.gov', 'esa.int', 'isro.gov.in', 'ncert.nic.in', 'indiapost.gov.in', 'etymonline.com'];
+const numMatch = (flat, num) => { const nf = String(num || '').replace(/,/g, '').toLowerCase(); if (!nf) return true; if (flat.includes(nf)) return true; const ni = nf.split('.')[0]; return ni.length >= 2 && flat.includes(ni); };
+const textOf = html => String(html).replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').toLowerCase();
+async function wikiVerify(f) {
+  // Search Wikipedia for the claim, verify in the extract, then prefer a primary source from the page's external links.
+  const kws = String(f.evidence || '').split('|').map(x => x.trim()).filter(Boolean);
+  const query = [f.claim, ...kws.slice(1)].filter(Boolean).join(' ').slice(0, 220);
+  const api = 'https://en.wikipedia.org/w/api.php';
+  const hdr = { 'user-agent': 'OrbixFacts/1.0 (fact-check; contact: site owner)' };
+  const sr = await fetch(`${api}?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&srlimit=3`, { headers: hdr, signal: AbortSignal.timeout(20000) });
+  if (!sr.ok) return { ok: false, why: `wiki search ${sr.status}` };
+  const sj = await sr.json();
+  const hits = sj?.query?.search || [];
+  for (const h of hits.slice(0, 3)) {
+    const title = h.title;
+    const er = await fetch(`${api}?action=query&prop=extracts%7Cextlinks&explaintext=1&exlimit=1&ellimit=200&titles=${encodeURIComponent(title)}&format=json`, { headers: hdr, signal: AbortSignal.timeout(25000) });
+    if (!er.ok) continue;
+    const ej = await er.json();
+    const page = Object.values(ej?.query?.pages || {})[0] || {};
+    const flat = String(page.extract || '').toLowerCase().replace(/[,\u00a0]/g, '');
+    const low = String(page.extract || '').toLowerCase();
+    const numOk = numMatch(flat, kws[0]);
+    const kwOk = kws.slice(1).filter(k => k.length > 2).filter(k => low.includes(k.toLowerCase())).length >= Math.min(2, kws.slice(1).filter(k => k.length > 2).length || 1);
+    if (!(numOk && kwOk)) continue;
+    // fact verified on Wikipedia; try to upgrade the citation to a primary external link on the page
+    const links = (page.extlinks || []).map(x => String(x['*'] || ''));
+    const prim = links.filter(u2 => { try { const ho = new URL(u2).hostname.toLowerCase(); return PRIMARY_HOSTS.some(ph => ho === ph || ho.endsWith('.' + ph)); } catch { return false; } }).slice(0, 3);
+    for (const pu of prim) {
+      try {
+        const u = await assertPublicUrl(pu);
+        const rr = await fetchPage(u);
+        if (!rr.ok) continue;
+        const t = textOf(await rr.text());
+        const f2 = t.replace(/[,\u00a0]/g, '');
+        if (numMatch(f2, kws[0]) && kws.slice(1).filter(k => k.length > 2).some(k => t.includes(k.toLowerCase()))) return { ok: true, url: pu };
+      } catch { /* next link */ }
+    }
+    return { ok: true, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}` };
+  }
+  return { ok: false, why: 'no wiki match' };
+}
+
 async function verifyFact(f) {
   try {
     const u = await assertPublicUrl(String(f.url || ''));
@@ -81,14 +124,14 @@ export async function factsScript(job, VideoJob) {
   // Verify the numbered facts against their sources; one LLM replacement round for failures.
   const factIdx = spec.scenes.map((s, i) => ({ s, i })).filter(x => x.s.url && x.s.claim);
   const failed = [];
-  for (const x of factIdx) { const v = await verifyFact(x.s); x.s._verified = v.ok; if (!v.ok) failed.push({ ...x, why: v.why }); }
+  for (const x of factIdx) { let v = await verifyFact(x.s); if (!v.ok) { const w = await wikiVerify(x.s).catch(() => ({ ok: false, why: 'wiki err' })); if (w.ok) { x.s.url = w.url; v = { ok: true, why: '' }; } else v.why += ` / ${w.why}`; } x.s._verified = v.ok; if (!v.ok) failed.push({ ...x, why: v.why }); }
   if (failed.length) {
     try {
       const ask = failed.map(f => `Scene said: ${f.s.say} (source check failed: ${f.why})`).join('\n');
       const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS + '\nReturn ONLY the replacement fact scenes array: {"scenes":[...]} with the same keys, one per failed fact, on the SAME topic. Every url must be a page you are confident contains the number.' }, { role: 'user', content: `Topic: ${job.topic}\nFailed facts:\n${ask}` }] });
       const j = jsonOf(m.content);
       const reps = (j && Array.isArray(j.scenes) ? j.scenes : []).slice(0, failed.length);
-      for (let k = 0; k < reps.length; k++) { const v = await verifyFact(reps[k]); if (v.ok) Object.assign(failed[k].s, reps[k], { _verified: true }); }
+      for (let k = 0; k < reps.length; k++) { let v = await verifyFact(reps[k]); if (!v.ok) { const w = await wikiVerify(reps[k]).catch(() => ({ ok: false })); if (w.ok) { reps[k].url = w.url; v = { ok: true }; } } if (v.ok) Object.assign(failed[k].s, reps[k], { _verified: true }); }
     } catch { /* keep originals dropped below */ }
   }
   const keptFacts = factIdx.filter(x => x.s._verified);
