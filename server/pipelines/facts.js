@@ -370,8 +370,8 @@ export async function factsStitch(job, { VideoJob, VideoBlob, blobBytes, fontsDi
     // Split into light passes so the small free-tier box does not run out of memory:
     // A) video-only overlays, B) audio-only mix, C) copy-mux.
     const fcV = [
-      `[0:v]drawbox=x=0:y=0:w=iw:h=150:color=0xFFC400:t=fill,subtitles=${assPath}:fontsdir=${fd}[b0]`,
-      ...emoFiles.map((e, k) => { const pre = `[${k + 2}:v]scale=420:420[em${k}]`; const ov = k === 0 ? `${pre};[b0][em${k}]overlay=620:200:enable='between(t,${e.a.toFixed(2)},${e.b.toFixed(2)})'[bx0]` : `${pre};[bx${k - 1}][em${k}]overlay=620:200:enable='between(t,${e.a.toFixed(2)},${e.b.toFixed(2)})'[bx${k}]`; return ov; }),
+      `[0:v]drawbox=x=0:y=0:w=iw:h=150:color=0xFFC400:t=fill,subtitles='${assPath}':fontsdir='${fd}'[b0]`,
+      ...emoFiles.map((e, k) => { const pre = `[${k + 1}:v]scale=420:420[em${k}]`; const ov = k === 0 ? `${pre};[b0][em${k}]overlay=620:200:enable='between(t,${e.a.toFixed(2)},${e.b.toFixed(2)})'[bx0]` : `${pre};[bx${k - 1}][em${k}]overlay=620:200:enable='between(t,${e.a.toFixed(2)},${e.b.toFixed(2)})'[bx${k}]`; return ov; }),
     ];
     const vis = path.join(dir, 'vis.mp4');
     await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', base, ...emoFiles.flatMap(e => ['-i', e.f]), '-filter_complex', fcV.join(';'), '-map', vOut, '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-threads', '2', '-movflags', '+faststart', vis], { timeout: 900000 });
