@@ -29,8 +29,8 @@ Shape: {"strip":"...","fiction":false,"scenes":[{"say":"...","kw":"...","emoji":
 Rules:
 - Exactly 6 scenes. Scene 1 = hook (badge empty, no claim/url). Scenes 2-5 = four numbered facts (badge "1".."4"). Scene 6 = ending: ask viewers to comment their favourite fact number and follow (badge empty, no claim/url).
 - "strip" = short Hindi top-bar title, e.g. "अंतरिक्ष के 4 चौंकाने वाले सच". If the topic is fiction, set fiction true and start the strip with "(काल्पनिक)".
-- "say" = 1-2 short spoken Hindi sentences in Devanagari. Hook must grab instantly. Number facts with "नंबर एक/दो/तीन/चार". Simple words, energetic.
-- "kw" = keyword box, TWO lines separated by \\n: line 1 = the headline number/word in Hindi (max 3 words, e.g. "243 दिन"), line 2 = short kicker in Hindi (max 3 words, e.g. "साल 225 दिन").
+- "say" = spoken Hindi in Devanagari. LENGTH MATTERS: hook 10-16 words and must grab instantly; each fact scene 2 full sentences of 16-24 words total (state the fact with its number, then why it is amazing); ending 12-18 words. Total spoken words across all 6 scenes must be 85-115 (about 45-58 seconds). Number facts with "नंबर एक/दो/तीन/चार". Simple words, energetic.
+- "kw" = keyword box, TWO lines separated by \\n: line 1 = the headline number/word in Hindi (max 3 words, MUST contain the fact number in digits, e.g. "243 दिन"), line 2 = short kicker in Hindi (max 3 words, e.g. "साल 225 दिन"). For hook and ending scenes kw can be empty.
 - "emoji" = exactly one unicode emoji matching the scene.
 - "visual" = ONE English sentence describing a vivid illustration of THIS line (what is visible, no text in image).
 - For the 4 fact scenes: "claim" = the key checkable statement, "url" = a primary or authoritative source page (NASA, Britannica, Smithsonian, NIH/NCBI, NCERT, official museum or government sites). Prefer deep stable article pages (e.g. britannica.com/place/Venus-planet, science.nasa.gov/venus/venus-facts), never homepages or search pages, and only URLs you are highly confident exist, "evidence" = the exact number as digits then | then 2-3 English keywords that must appear on that page (e.g. "243|Venus|rotation|day"). Facts must be real, current, non-political, non-religious.`;
@@ -121,6 +121,15 @@ export async function factsScript(job, VideoJob) {
   }
   if (!spec) throw new Error('Could not write the facts script. Please try again.');
   spec.scenes = spec.scenes.slice(0, 6);
+  // Too-short scripts make a 15-second video; ask once for a fuller cut.
+  const wc = () => spec.scenes.reduce((n, x) => n + String(x.say || '').split(/\s+/).filter(Boolean).length, 0);
+  if (wc() < 65) {
+    try {
+      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}\nYour previous draft was only ${wc()} spoken words - far too short. Rewrite the FULL script with 85-115 spoken words total. Keep the same facts and sources.` }] });
+      const j = jsonOf(m.content);
+      if (j && Array.isArray(j.scenes) && j.scenes.length >= 5) { spec = j; spec.scenes = spec.scenes.slice(0, 6); }
+    } catch { /* keep short draft */ }
+  }
   // Verify the numbered facts against their sources; one LLM replacement round for failures.
   const factIdx = spec.scenes.map((s, i) => ({ s, i })).filter(x => x.s.url && x.s.claim);
   const failed = [];
@@ -252,8 +261,8 @@ export function buildAss({ meta, scenes, total }) {
       ev(3, a, b, 'Badge', `{\\pos(120,272)}${sc.badge}`);
     }
     const kwLines = String(sc.kw || '').split('\n').map(s => s.trim()).filter(Boolean).slice(0, 2);
-    if (kwLines[0]) ev(3, a, b, 'KwR', `{\\pos(540,530)}${escAss(kwLines[0])}`);
-    if (kwLines[1]) ev(3, a, b, 'KwY', `{\\pos(540,662)}${escAss(kwLines[1])}`);
+    if (kwLines[0]) ev(3, a, b, 'KwR', `{\\pos(540,700)}${escAss(kwLines[0])}`);
+    if (kwLines[1]) ev(3, a, b, 'KwY', `{\\pos(540,832)}${escAss(kwLines[1])}`);
     // word-by-word captions: chunk of 2 words (3 if remainder 3); one event per word position, current word yellow.
     const ws = sc.words || [];
     const chunks = []; let ci = 0;
