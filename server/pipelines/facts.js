@@ -29,7 +29,7 @@ Shape: {"strip":"...","fiction":false,"scenes":[{"say":"...","kw":"...","emoji":
 Rules:
 - Exactly 10 scenes. Scene 1 = hook (badge empty, no claim/url). Scenes 2-9 = EIGHT candidate numbered facts (badge "1".."8"); only the 5 that verify will be used, so make all 8 strong. Scene 10 = ending: ask viewers to comment their favourite fact number and follow (badge empty, no claim/url).
 - "strip" = short Hindi top-bar title, e.g. "अंतरिक्ष के 5 चौंकाने वाले सच (strip ka number final kept facts se badal diya jayega)". If the topic is fiction, set fiction true and start the strip with "(काल्पनिक)".
-- "say" = spoken Hindi in Devanagari. LENGTH MATTERS: hook 12-18 words and must grab instantly; each fact scene 2-3 full sentences of 24-32 words total (state the fact with its number, then why it is amazing); ending 12-18 words. Each fact scene must be 24-32 spoken words; hook 12-18; ending 12-18 (about 45-58 seconds). Number facts with "नंबर एक/दो/तीन/चार/पांच". Simple words, energetic.
+- "say" = spoken Hindi in Devanagari. LENGTH MATTERS: hook 12-18 words and must grab instantly; each fact scene 2-3 full sentences of 24-32 words total (state the fact with its number, then why it is amazing); ending 12-18 words. Each fact scene must be 24-32 spoken words; hook 12-18; ending 12-18 (about 45-58 seconds). NEVER speak fact numbers (no "नंबर एक/दो/तीन" etc.) - an on-screen badge already shows the number; state each fact directly. Simple words, energetic.
 - "kw" = keyword box, TWO lines separated by \\n: line 1 = the headline number/word in Hindi (max 3 words, MUST contain a number in digits taken FROM THE FACT ITSELF, e.g. "243 दिन"), line 2 = short kicker in Hindi (max 3 words, e.g. "साल 225 दिन"). For hook and ending scenes kw can be empty. NEVER use the fact list position (1,2,3,4,5) as that number - the badge already shows the position.
 - "emoji" = exactly one unicode emoji matching the scene.
 - "visual" = ONE English sentence describing a vivid illustration of THIS line (objects/places/phenomena only - never any person, human, face or character; no text in image).
@@ -120,6 +120,41 @@ async function verifyFact(f) {
   } catch (e) { return { ok: false, why: String(e.message).slice(0, 80) }; }
 }
 
+
+async function semanticVerify(kept) {
+  const WAPI = 'https://en.wikipedia.org/w/api.php';
+  const hdr = { 'user-agent': 'OrbixFacts/1.0 (fact-check; contact: site owner)' };
+  const items = [];
+  for (const [k, x] of kept.entries()) {
+    let txt = '';
+    try {
+      const u = new URL(String(x.s.url || ''));
+      if (u.hostname.endsWith('wikipedia.org')) {
+        const title = decodeURIComponent((u.pathname.split('/wiki/')[1] || '').replace(/_/g, ' '));
+        const er = await fetch(`${WAPI}?action=query&prop=extracts&explaintext=1&exsectionformat=plain&titles=${encodeURIComponent(title)}&format=json`, { headers: hdr, signal: AbortSignal.timeout(25000) });
+        if (er.ok) { const ej = await er.json(); txt = String(Object.values(ej?.query?.pages || {})[0]?.extract || ''); }
+      } else {
+        const u2 = await assertPublicUrl(String(x.s.url || ''));
+        const r = await fetchPage(u2);
+        if (r.ok) txt = String(await r.text()).replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+      }
+    } catch { /* skip */ }
+    if (txt && txt.length > 200) items.push({ i: k + 1, claim: String(x.s.claim || ''), source: txt.slice(0, 3500) });
+    await new Promise(r => setTimeout(r, 400));
+  }
+  if (!items.length) return new Set();
+  try {
+    const m = await chatCompletion({ tools: [], messages: [
+      { role: 'system', content: 'You are a strict fact checker for a Hindi facts video. For each item decide whether the SOURCE explicitly supports the CLAIM: the exact number with the exact unit AND the exact subject must match (58 minutes vs 243 days is a FAIL; a number that appears about a different planet is a FAIL; unit mismatches like hours vs days are a FAIL). Return ONLY {"verdicts":[{"i":1,"ok":true}]}; include every item.' },
+      { role: 'user', content: JSON.stringify(items) }] });
+    const j = jsonOf(m.content);
+    const okSet = new Set((j && Array.isArray(j.verdicts) ? j.verdicts : []).filter(v => v && v.ok).map(v => v.i | 0));
+    const bad = new Set();
+    for (const it of items) if (!okSet.has(it.i)) bad.add(it.i - 1);
+    return bad;
+  } catch { return new Set(); }
+}
+
 export async function factsScript(job, VideoJob) {
   let spec = null;
   for (let a = 0; a < 3 && !spec; a++) {
@@ -157,7 +192,9 @@ export async function factsScript(job, VideoJob) {
       for (let k = 0; k < reps.length; k++) { let v = await verifyFact(reps[k]); if (!v.ok) { const w = await wikiVerify(reps[k]).catch(() => ({ ok: false })); if (w.ok) { reps[k].url = w.url; v = { ok: true }; } } if (v.ok) Object.assign(failed[k].s, reps[k], { _verified: true }); }
     } catch { /* keep originals dropped below */ }
   }
-  const keptFacts = factIdx.filter(x => x.s._verified).slice(0, 5);
+  let keptFacts = factIdx.filter(x => x.s._verified).slice(0, 5);
+  // semantic pass: source text must support the exact claim (subject + number + unit) - substring checks pass hallucinations like "Venus day = 58 minutes"
+  try { const badSem = await semanticVerify(keptFacts); if (badSem.size) keptFacts = keptFacts.filter((x, k) => !badSem.has(k)); } catch { /* keep */ }
   // kw accuracy pass: the box must match the fact exactly (units, numbers) - a wrong unit on screen is worse than no box.
   try {
     const askKw = keptFacts.map((x, k) => `${k + 1}. claim: ${x.s.claim}
