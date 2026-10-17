@@ -184,9 +184,9 @@ export async function makeFactsScene(job, i, VideoJob, VideoBlob, blobBytes) {
   }
   job.stage = `${tag}: drawing`; await job.save().catch(() => {});
   const prompt = `${job.scenes[i].prompt}. ${IMG_STYLE}.`;
-  let img = null, via = '';
+  let img = null, via = '', gemErr = '', fluxErr = '', polErr = '';
   if (process.env.GEMINI_API_KEY) {
-    for (let a = 0; a < 2 && !img; a++) { try { img = await generateImageGemini({ prompt, aspect: '9:16' }); via = 'Google AI Studio'; } catch (e) { console.error('facts gemini img', String(e.message).slice(0, 120)); await new Promise(r => setTimeout(r, 3000)); } }
+    for (let a = 0; a < 3 && !img; a++) { try { img = await generateImageGemini({ prompt, aspect: '9:16' }); via = 'Google AI Studio'; } catch (e) { gemErr = String(e.message).slice(0, 90); console.error('facts gemini img', gemErr); await new Promise(r => setTimeout(r, 8000)); } }
   }
   if (!img) {
     for (let a = 0; a < 2 && !img; a++) {
@@ -194,10 +194,22 @@ export async function makeFactsScene(job, i, VideoJob, VideoBlob, blobBytes) {
         const url = await generateImage({ prompt, width: 768, height: 1024 });
         const r = await fetch(url, { signal: AbortSignal.timeout(60000) });
         if (r.ok) { const b = Buffer.from(await r.arrayBuffer()); if (b.length > 5000) { img = b; via = 'FLUX (free GPU)'; } }
-      } catch (e) { console.error('facts flux img', String(e.message).slice(0, 120)); await new Promise(r => setTimeout(r, 4000)); }
+      } catch (e) { fluxErr = String(e.message).slice(0, 60); console.error('facts flux img', fluxErr); await new Promise(r => setTimeout(r, 4000)); }
     }
   }
-  if (!img) throw new Error('Free GPU quota is used up - could not draw this scene');
+  if (!img) { // keyless Pollinations still (no quota)
+    for (let a = 0; a < 3 && !img; a++) {
+      try {
+        const q = encodeURIComponent(String(prompt).slice(0, 350));
+        const r = await fetch(`https://image.pollinations.ai/prompt/${q}?width=720&height=1280&nologo=true&seed=${Date.now() % 100000 + i}`, { signal: AbortSignal.timeout(90000) });
+        const b = Buffer.from(await r.arrayBuffer());
+        if (r.ok && /image/.test(r.headers.get('content-type') || '') && b.length > 5000) { img = b; via = 'Pollinations (keyless)'; } else polErr = `HTTP ${r.status}`;
+      } catch (e) { polErr = String(e.message).slice(0, 60); }
+      if (!img) await new Promise(r => setTimeout(r, 5000));
+    }
+  }
+  if (!img) { job.note = `scene img failed: gemini=${gemErr || 'n/a'} | flux=${fluxErr || 'n/a'} | pol=${polErr || 'n/a'}`; await job.save().catch(() => {}); throw new Error('Free GPU quota is used up - could not draw this scene'); }
+  if (via !== 'Google AI Studio' && gemErr) { job.note = `gemini img fallback (${via}): ${gemErr}`.slice(0, 200); await job.save().catch(() => {}); }
   await VideoBlob.deleteMany({ jobId: job._id, kind: 'factimg', idx: i });
   await VideoBlob.create({ jobId: job._id, kind: 'factimg', idx: i, data: img });
   job.panelStats = (job.panelStats || '') + (via === 'Google AI Studio' ? 'G' : 'F');
