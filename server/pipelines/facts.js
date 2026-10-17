@@ -29,7 +29,7 @@ Shape: {"strip":"...","fiction":false,"scenes":[{"say":"...","kw":"...","emoji":
 Rules:
 - Exactly 6 scenes. Scene 1 = hook (badge empty, no claim/url). Scenes 2-5 = four numbered facts (badge "1".."4"). Scene 6 = ending: ask viewers to comment their favourite fact number and follow (badge empty, no claim/url).
 - "strip" = short Hindi top-bar title, e.g. "अंतरिक्ष के 4 चौंकाने वाले सच". If the topic is fiction, set fiction true and start the strip with "(काल्पनिक)".
-- "say" = spoken Hindi in Devanagari. LENGTH MATTERS: hook 10-16 words and must grab instantly; each fact scene 2 full sentences of 16-24 words total (state the fact with its number, then why it is amazing); ending 12-18 words. Total spoken words across all 6 scenes must be 85-115 (about 45-58 seconds). Number facts with "नंबर एक/दो/तीन/चार". Simple words, energetic.
+- "say" = spoken Hindi in Devanagari. LENGTH MATTERS: hook 12-18 words and must grab instantly; each fact scene 2-3 full sentences of 22-30 words total (state the fact with its number, then why it is amazing); ending 12-18 words. Total spoken words across all 6 scenes must be 110-145 (about 45-58 seconds). Number facts with "नंबर एक/दो/तीन/चार". Simple words, energetic.
 - "kw" = keyword box, TWO lines separated by \\n: line 1 = the headline number/word in Hindi (max 3 words, MUST contain the fact number in digits, e.g. "243 दिन"), line 2 = short kicker in Hindi (max 3 words, e.g. "साल 225 दिन"). For hook and ending scenes kw can be empty.
 - "emoji" = exactly one unicode emoji matching the scene.
 - "visual" = ONE English sentence describing a vivid illustration of THIS line (what is visible, no text in image).
@@ -123,12 +123,16 @@ export async function factsScript(job, VideoJob) {
   spec.scenes = spec.scenes.slice(0, 6);
   // Too-short scripts make a 15-second video; ask once for a fuller cut.
   const wc = () => spec.scenes.reduce((n, x) => n + String(x.say || '').split(/\s+/).filter(Boolean).length, 0);
-  if (wc() < 65) {
+  for (let a = 0; a < 2 && wc() < 95; a++) {
     try {
-      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}\nYour previous draft was only ${wc()} spoken words - far too short. Rewrite the FULL script with 85-115 spoken words total. Keep the same facts and sources.` }] });
+      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}\nYour previous draft was only ${wc()} spoken words - far too short. Rewrite the FULL script with 110-145 spoken words total; every fact scene needs 2-3 full sentences. Keep the same facts and sources.` }] });
       const j = jsonOf(m.content);
-      if (j && Array.isArray(j.scenes) && j.scenes.length >= 5) { spec = j; spec.scenes = spec.scenes.slice(0, 6); }
-    } catch { /* keep short draft */ }
+      if (j && Array.isArray(j.scenes) && j.scenes.length >= 5) {
+        const oldWc = wc(); const cand = j; cand.scenes = cand.scenes.slice(0, 6);
+        const candWc = cand.scenes.reduce((n, x) => n + String(x.say || '').split(/\s+/).filter(Boolean).length, 0);
+        if (candWc > oldWc) spec = cand;
+      }
+    } catch { /* keep best draft */ }
   }
   // Verify the numbered facts against their sources; one LLM replacement round for failures.
   const factIdx = spec.scenes.map((s, i) => ({ s, i })).filter(x => x.s.url && x.s.claim);
@@ -154,7 +158,8 @@ export async function factsScript(job, VideoJob) {
     kw: String(s.kw || '').replace(/\\n/g, '\n').slice(0, 60), state: 'wait', tries: 0, t0: 0, t1: 0,
     badge: s.badge ? String(b++) : '',
   }));
-  job.factsMeta = JSON.stringify({ strip: String(spec.strip || job.topic).slice(0, 60), fiction: !!spec.fiction, emojis: scenes.map(s => String(s.emoji || '').slice(0, 8)), sources: keptFacts.map(x => String(x.s.url).slice(0, 200)) });
+  const stripTxt = String(spec.strip || job.topic).replace(/(के\s+|की\s+)(\d+|एक|दो|तीन|चार|पाँच|पांच|छह)(\s+)/, `$1${keptFacts.length}$3`).slice(0, 60);
+  job.factsMeta = JSON.stringify({ strip: stripTxt, fiction: !!spec.fiction, emojis: scenes.map(s => String(s.emoji || '').slice(0, 8)), sources: keptFacts.map(x => String(x.s.url).slice(0, 200)) });
   job.status = 'clips'; job.stage = 'Drawing scene 1'; await job.save();
 }
 
@@ -294,7 +299,7 @@ export async function factsStitch(job, { VideoJob, VideoBlob, blobBytes, fontsDi
     if (vb) {
       const raw = path.join(dir, 'voice0.wav'); await fs.writeFile(raw, await blobBytes(vb));
       voiceFile = path.join(dir, 'voice.wav');
-      await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', raw, '-af', 'silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse,aresample=44100,atempo=1.15', '-ac', '1', voiceFile], { timeout: 120000 });
+      await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', raw, '-af', 'silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse,aresample=44100,atempo=1.08', '-ac', '1', voiceFile], { timeout: 120000 });
     } else {
       const parts = [];
       for (const s of okScenes) { const ab = await VideoBlob.findOne({ jobId: job._id, kind: 'audio', idx: s.i }); if (!ab) continue; const f = path.join(dir, `va${s.i}.wav`); await fs.writeFile(f, await blobBytes(ab)); parts.push(f); }
@@ -303,7 +308,7 @@ export async function factsStitch(job, { VideoJob, VideoBlob, blobBytes, fontsDi
       const list = []; for (const p of parts) { list.push(p, sil); }
       voiceFile = path.join(dir, 'voice.wav');
       await fs.writeFile(path.join(dir, 'vl.txt'), list.map(f => `file '${f}'`).join('\n'));
-      await run(ffmpegPath, ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'vl.txt'), '-af', 'aresample=44100,atempo=1.15', '-ac', '1', voiceFile], { timeout: 120000 });
+      await run(ffmpegPath, ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'vl.txt'), '-af', 'aresample=44100,atempo=1.08', '-ac', '1', voiceFile], { timeout: 120000 });
     }
     total = await durOf(voiceFile);
     if (!total) throw new Error('The voice track is empty.');
