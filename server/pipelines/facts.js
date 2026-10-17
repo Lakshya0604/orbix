@@ -330,7 +330,7 @@ export async function factsStitch(job, { VideoJob, VideoBlob, blobBytes, fontsDi
         const seg = path.join(dir, `seg${s.i}_${j}.mp4`);
         await run(ffmpegPath, ['-y', '-loglevel', 'error', '-loop', '1', '-framerate', String(FPS), '-i', img,
           '-vf', `scale=1620:2880,zoompan=z='${z0}+(${z1 - z0})*on/${frames}':x='(iw-iw/zoom)*${fx.toFixed(2)}':y='(ih-ih/zoom)*${fy.toFixed(2)}':d=${frames}:s=${FW}x${FH}:fps=${FPS}`,
-          '-frames:v', String(frames), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', seg], { timeout: 180000 });
+          '-frames:v', String(frames), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-threads', '2', seg], { timeout: 180000 });
         segFiles.push(seg);
       }
       for (let j = 1; j < n; j++) cutTimes.push(s.t0 + (dur / n) * j);
@@ -365,14 +365,19 @@ export async function factsStitch(job, { VideoJob, VideoBlob, blobBytes, fontsDi
       wlabels.push(`[wh${k}]`);
     });
     const mixIns = ['[1:a]', '[bed]', '[kick]', ...wlabels].join('');
-    const fc = [
-      `[0:v]drawbox=x=0:y=0:w=iw:h=150:color=0xFFC400:t=fill,subtitles=${assPath}:fontsdir=${fd}[b0]`,
-      ...emoFiles.map((e, k) => { const src = `[b${k === 0 ? 0 : 'x' + (k - 1)}]`; const pre = `[${k + 2}:v]scale=420:420[em${k}]`; const ov = k === 0 ? `${pre};[b0][em${k}]overlay=620:200:enable='between(t,${e.a.toFixed(2)},${e.b.toFixed(2)})'[bx0]` : `${pre};[bx${k - 1}][em${k}]overlay=620:200:enable='between(t,${e.a.toFixed(2)},${e.b.toFixed(2)})'[bx${k}]`; return ov; }),
-      bed + ';' + kick + ';' + whoosh + mixIns + `amix=inputs=${3 + wlabels.length}:duration=first:normalize=0,alimiter=limit=0.95[a]`,
-    ];
     const vOut = emoFiles.length ? `[bx${emoFiles.length - 1}]` : '[b0]';
     const out = path.join(dir, 'out.mp4');
-    await run(ffmpegPath, ['-y', '-loglevel', 'error', ...inputs, '-filter_complex', fc.join(';'), '-map', vOut, '-map', '[a]', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-shortest', '-movflags', '+faststart', out], { timeout: 900000 });
+    // Split into light passes so the small free-tier box does not run out of memory:
+    // A) video-only overlays, B) audio-only mix, C) copy-mux.
+    const fcV = [
+      `[0:v]drawbox=x=0:y=0:w=iw:h=150:color=0xFFC400:t=fill,subtitles=${assPath}:fontsdir=${fd}[b0]`,
+      ...emoFiles.map((e, k) => { const pre = `[${k + 2}:v]scale=420:420[em${k}]`; const ov = k === 0 ? `${pre};[b0][em${k}]overlay=620:200:enable='between(t,${e.a.toFixed(2)},${e.b.toFixed(2)})'[bx0]` : `${pre};[bx${k - 1}][em${k}]overlay=620:200:enable='between(t,${e.a.toFixed(2)},${e.b.toFixed(2)})'[bx${k}]`; return ov; }),
+    ];
+    const vis = path.join(dir, 'vis.mp4');
+    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', base, ...emoFiles.flatMap(e => ['-i', e.f]), '-filter_complex', fcV.join(';'), '-map', vOut, '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-threads', '2', '-movflags', '+faststart', vis], { timeout: 900000 });
+    const mix = path.join(dir, 'mix.m4a');
+    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', voiceFile, '-filter_complex', bed + ';' + kick + ';' + whoosh + mixIns + `amix=inputs=${3 + wlabels.length}:duration=first:normalize=0,alimiter=limit=0.95[a]`, '-map', '[a]', '-c:a', 'aac', '-b:a', '160k', '-t', total.toFixed(2), mix], { timeout: 300000 });
+    await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', vis, '-i', mix, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'copy', '-shortest', '-movflags', '+faststart', out], { timeout: 300000 });
     const data = await fs.readFile(out);
     if (data.length > 60e6) throw new Error('The video came out too large to save on the free plan.');
     await VideoBlob.deleteMany({ jobId: job._id, kind: 'final' });
