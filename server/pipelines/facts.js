@@ -16,7 +16,7 @@ import { assertPublicUrl } from '../ssrf.js';
 
 const run = promisify(execFile);
 const FW = 1080, FH = 1920, FPS = 24;
-const IMG_STYLE = 'vivid dramatic digital illustration, rich saturated colors, high detail, vertical composition, cinematic lighting, no text, no letters, no watermark';
+const IMG_STYLE = 'vivid dramatic digital illustration, rich saturated colors, high detail, vertical composition, cinematic lighting, no text, no letters, no watermark, no people, no humans, no faces, no characters';
 
 const jsonOf = t => { const m = String(t || '').match(/\{[\s\S]*\}/); if (!m) return null; try { return JSON.parse(m[0]); } catch { return null; } };
 const assTime = t => { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), sec = (t % 60).toFixed(2).padStart(5, '0'); return `${h}:${String(m).padStart(2, '0')}:${sec}`; };
@@ -24,15 +24,15 @@ const escAss = s => String(s || '').replace(/[{}\\]/g, '').replace(/\s+/g, ' ').
 const hasDev = s => /[\u0900-\u097F]/.test(s || '');
 const fontFor = s => (hasDev(s) ? 'Noto Sans Devanagari' : 'Noto Sans');
 
-const SCRIPT_SYS = `You write a Hindi YouTube Shorts FACTS video script (45-58 seconds spoken). Reply ONLY valid JSON, no double quotes inside values.
+const SCRIPT_SYS = `You write a Hindi YouTube Shorts FACTS video script (48-60 seconds spoken). Reply ONLY valid JSON, no double quotes inside values.
 Shape: {"strip":"...","fiction":false,"scenes":[{"say":"...","kw":"...","emoji":"...","visual":"...","badge":"1","claim":"...","url":"...","evidence":"..."}]}
 Rules:
-- Exactly 6 scenes. Scene 1 = hook (badge empty, no claim/url). Scenes 2-5 = four numbered facts (badge "1".."4"). Scene 6 = ending: ask viewers to comment their favourite fact number and follow (badge empty, no claim/url).
-- "strip" = short Hindi top-bar title, e.g. "अंतरिक्ष के 4 चौंकाने वाले सच". If the topic is fiction, set fiction true and start the strip with "(काल्पनिक)".
-- "say" = spoken Hindi in Devanagari. LENGTH MATTERS: hook 12-18 words and must grab instantly; each fact scene 2-3 full sentences of 22-30 words total (state the fact with its number, then why it is amazing); ending 12-18 words. Total spoken words across all 6 scenes must be 110-145 (about 45-58 seconds). Number facts with "नंबर एक/दो/तीन/चार". Simple words, energetic.
+- Exactly 7 scenes. Scene 1 = hook (badge empty, no claim/url). Scenes 2-6 = five numbered facts (badge "1".."5"). Scene 7 = ending: ask viewers to comment their favourite fact number and follow (badge empty, no claim/url).
+- "strip" = short Hindi top-bar title, e.g. "अंतरिक्ष के 5 चौंकाने वाले सच". If the topic is fiction, set fiction true and start the strip with "(काल्पनिक)".
+- "say" = spoken Hindi in Devanagari. LENGTH MATTERS: hook 12-18 words and must grab instantly; each fact scene 2 full sentences of 18-26 words total (state the fact with its number, then why it is amazing); ending 12-18 words. Total spoken words across all 7 scenes must be 115-150 (about 45-58 seconds). Number facts with "नंबर एक/दो/तीन/चार/पांच". Simple words, energetic.
 - "kw" = keyword box, TWO lines separated by \\n: line 1 = the headline number/word in Hindi (max 3 words, MUST contain the fact number in digits, e.g. "243 दिन"), line 2 = short kicker in Hindi (max 3 words, e.g. "साल 225 दिन"). For hook and ending scenes kw can be empty.
 - "emoji" = exactly one unicode emoji matching the scene.
-- "visual" = ONE English sentence describing a vivid illustration of THIS line (what is visible, no text in image).
+- "visual" = ONE English sentence describing a vivid illustration of THIS line (objects/places/phenomena only - never any person, human, face or character; no text in image).
 - For the 4 fact scenes: "claim" = the key checkable statement, "url" = a primary or authoritative source page (NASA, Britannica, Smithsonian, NIH/NCBI, NCERT, official museum or government sites). Prefer deep stable article pages (e.g. britannica.com/place/Venus-planet, science.nasa.gov/venus/venus-facts), never homepages or search pages, and only URLs you are highly confident exist, "evidence" = the exact number as digits then | then 2-3 English keywords that must appear on that page (e.g. "243|Venus|rotation|day"). Facts must be real, current, non-political, non-religious.`;
 
 async function fetchPage(u) {
@@ -116,19 +116,19 @@ export async function factsScript(job, VideoJob) {
     try {
       const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}` }] });
       const j = jsonOf(m.content);
-      if (j && Array.isArray(j.scenes) && j.scenes.length >= 5) spec = j;
+      if (j && Array.isArray(j.scenes) && j.scenes.length >= 6) spec = j;
     } catch (e) { await new Promise(r => setTimeout(r, 6000 * (a + 1))); }
   }
   if (!spec) throw new Error('Could not write the facts script. Please try again.');
-  spec.scenes = spec.scenes.slice(0, 6);
+  spec.scenes = spec.scenes.slice(0, 7);
   // Too-short scripts make a 15-second video; ask once for a fuller cut.
   const wc = () => spec.scenes.reduce((n, x) => n + String(x.say || '').split(/\s+/).filter(Boolean).length, 0);
   for (let a = 0; a < 2 && wc() < 95; a++) {
     try {
-      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}\nYour previous draft was only ${wc()} spoken words - far too short. Rewrite the FULL script with 110-145 spoken words total; every fact scene needs 2-3 full sentences. Keep the same facts and sources.` }] });
+      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}\nYour previous draft was only ${wc()} spoken words - far too short. Rewrite the FULL script with 115-150 spoken words total; every fact scene needs 2 full sentences. Keep the same facts and sources.` }] });
       const j = jsonOf(m.content);
-      if (j && Array.isArray(j.scenes) && j.scenes.length >= 5) {
-        const oldWc = wc(); const cand = j; cand.scenes = cand.scenes.slice(0, 6);
+      if (j && Array.isArray(j.scenes) && j.scenes.length >= 6) {
+        const oldWc = wc(); const cand = j; cand.scenes = cand.scenes.slice(0, 7);
         const candWc = cand.scenes.reduce((n, x) => n + String(x.say || '').split(/\s+/).filter(Boolean).length, 0);
         if (candWc > oldWc) spec = cand;
       }
@@ -299,7 +299,7 @@ export async function factsStitch(job, { VideoJob, VideoBlob, blobBytes, fontsDi
     if (vb) {
       const raw = path.join(dir, 'voice0.wav'); await fs.writeFile(raw, await blobBytes(vb));
       voiceFile = path.join(dir, 'voice.wav');
-      await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', raw, '-af', 'silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse,aresample=44100,atempo=1.08', '-ac', '1', voiceFile], { timeout: 120000 });
+      await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', raw, '-af', 'silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse,aresample=44100', '-ac', '1', voiceFile], { timeout: 120000 });
     } else {
       const parts = [];
       for (const s of okScenes) { const ab = await VideoBlob.findOne({ jobId: job._id, kind: 'audio', idx: s.i }); if (!ab) continue; const f = path.join(dir, `va${s.i}.wav`); await fs.writeFile(f, await blobBytes(ab)); parts.push(f); }
@@ -308,7 +308,7 @@ export async function factsStitch(job, { VideoJob, VideoBlob, blobBytes, fontsDi
       const list = []; for (const p of parts) { list.push(p, sil); }
       voiceFile = path.join(dir, 'voice.wav');
       await fs.writeFile(path.join(dir, 'vl.txt'), list.map(f => `file '${f}'`).join('\n'));
-      await run(ffmpegPath, ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'vl.txt'), '-af', 'aresample=44100,atempo=1.08', '-ac', '1', voiceFile], { timeout: 120000 });
+      await run(ffmpegPath, ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'vl.txt'), '-af', 'aresample=44100', '-ac', '1', voiceFile], { timeout: 120000 });
     }
     total = await durOf(voiceFile);
     if (!total) throw new Error('The voice track is empty.');
