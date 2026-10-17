@@ -364,7 +364,7 @@ export async function factsStitch(job, { VideoJob, VideoBlob, blobBytes, fontsDi
       whoosh += `anoisesrc=color=white:sample_rate=44100:duration=0.22[w${k}];[w${k}]lowpass=f=2600,volume=0.08,afade=t=in:st=0:d=0.05,afade=t=out:st=0.05:d=0.17,adelay=${Math.round(t * 1000)}:all=1[wh${k}];`;
       wlabels.push(`[wh${k}]`);
     });
-    const mixIns = ['[1:a]', '[bed]', '[kick]', ...wlabels].join('');
+    const mixIns = ['[0:a]', '[bed]', '[kick]', ...wlabels].join('');
     const vOut = emoFiles.length ? `[bx${emoFiles.length - 1}]` : '[b0]';
     const out = path.join(dir, 'out.mp4');
     // Split into light passes so the small free-tier box does not run out of memory:
