@@ -248,13 +248,13 @@ export function buildAss({ meta, scenes, total }) {
   const S = [];
   S.push(`[Script Info]\nScriptType: v4.00+\nPlayResX: ${FW}\nPlayResY: ${FH}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n`);
   S.push(`[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding`);
-  S.push(`Style: Strip,${fontFor(strip)},46,&H00000000,&H00000000,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,8,30,30,42,1`);
-  S.push(`Style: KwR,Noto Sans Devanagari,100,&H00FFFFFF,&H00FFFFFF,&H001E14DC,&H00000000,-1,0,0,0,100,100,0,0,3,14,8,5,60,60,0,1`);
-  S.push(`Style: KwY,Noto Sans Devanagari,92,&H00000000,&H00000000,&H0000D6FF,&H00000000,-1,0,0,0,100,100,0,0,3,12,8,5,60,60,0,1`);
+  S.push(`Style: Strip,${fontFor(strip)},54,&H00000000,&H00000000,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,8,30,30,42,1`);
+  S.push(`Style: KwR,Noto Sans Devanagari,114,&H00FFFFFF,&H00FFFFFF,&H002420ED,&H00000000,-1,0,0,0,100,100,0,0,3,16,8,5,60,60,0,1`);
+  S.push(`Style: KwY,Noto Sans Devanagari,104,&H00000000,&H00000000,&H0000D6FF,&H00000000,-1,0,0,0,100,100,0,0,3,14,8,5,60,60,0,1`);
   S.push(`Style: Badge,Noto Sans,64,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,5,0,0,0,1`);
-  S.push(`Style: Circ,Noto Sans,10,&H001E14DC,&H001E14DC,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1`);
-  S.push(`Style: Cap,Noto Sans Devanagari,58,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,2,2,40,40,470,1`);
-  S.push(`Style: Wm,Noto Sans,34,&H14FFFFFF,&H14FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,1,3,40,40,22,1`);
+  S.push(`Style: Circ,Noto Sans,10,&H002420ED,&H002420ED,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1`);
+  S.push(`Style: Cap,Noto Sans Devanagari,96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,9,2,2,50,50,480,1`);
+  S.push(`Style: Wm,Noto Sans,46,&H14FFFFFF,&H14FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,1,3,50,50,30,1`);
   S.push(`\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text`);
   const ev = (layer, a, b, style, text) => S.push(`Dialogue: ${layer},${assTime(a)},${assTime(b)},${style},,0,0,0,,${text}`);
   ev(4, 0, total, 'Strip', strip);
@@ -266,8 +266,8 @@ export function buildAss({ meta, scenes, total }) {
       ev(3, a, b, 'Badge', `{\\pos(120,272)}${sc.badge}`);
     }
     const kwLines = String(sc.kw || '').split('\n').map(s => s.trim()).filter(Boolean).slice(0, 2);
-    if (kwLines[0]) ev(3, a, b, 'KwR', `{\\pos(540,700)}${escAss(kwLines[0])}`);
-    if (kwLines[1]) ev(3, a, b, 'KwY', `{\\pos(540,832)}${escAss(kwLines[1])}`);
+    if (kwLines[0]) ev(3, a, b, 'KwR', `{\\pos(540,660)}${escAss(kwLines[0])}`);
+    if (kwLines[1]) ev(3, a, b, 'KwY', `{\\pos(540,795)}${escAss(kwLines[1])}`);
     // word-by-word captions: chunk of 2 words (3 if remainder 3); one event per word position, current word yellow.
     const ws = sc.words || [];
     const chunks = []; let ci = 0;
