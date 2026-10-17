@@ -33,7 +33,9 @@ Rules:
 - "kw" = keyword box, TWO lines separated by \\n: line 1 = the headline number/word in Hindi (max 3 words, MUST contain a number in digits taken FROM THE FACT ITSELF, e.g. "243 दिन"), line 2 = short kicker in Hindi (max 3 words, e.g. "साल 225 दिन"). For hook and ending scenes kw can be empty. NEVER use the fact list position (1,2,3,4,5) as that number - the badge already shows the position.
 - "emoji" = exactly one unicode emoji matching the scene.
 - "visual" = ONE English sentence describing a vivid illustration of THIS line (objects/places/phenomena only - never any person, human, face or character; no text in image).
-- For the 4 fact scenes: "claim" = the key checkable statement, "url" = a primary or authoritative source page (NASA, Britannica, Smithsonian, NIH/NCBI, NCERT, official museum or government sites). Prefer stable en.wikipedia.org article URLs you are highly confident exist (most reliable for verification), then deep stable primary article pages (e.g. britannica.com/place/Venus-planet, science.nasa.gov/venus/venus-facts), never homepages or search pages, and only URLs you are highly confident exist, "evidence" = the exact number as digits then | then 2-3 English keywords that must appear on that page (e.g. "243|Venus|rotation|day"). Facts must be real, current, non-political, non-religious. Comparisons must be TRUE TODAY, not from old data: for Jupiter's Great Red Spot say only "पृथ्वी से बड़ा" (it is about 1.3 Earths wide now), never 2 Earths. Same care for any shrinking/changing record.`;
+- For the 4 fact scenes: "claim" = the key checkable statement, "url" = a primary or authoritative source page (NASA, Britannica, Smithsonian, NIH/NCBI, NCERT, official museum or government sites). Prefer stable en.wikipedia.org article URLs you are highly confident exist (most reliable for verification), then deep stable primary article pages (e.g. britannica.com/place/Venus-planet, science.nasa.gov/venus/venus-facts), never homepages or search pages, and only URLs you are highly confident exist, "evidence" = the exact number as digits then | then 2-3 English keywords that must appear on that page (e.g. "243|Venus|rotation|day"). Facts must be real, current, non-political, non-religious. Comparisons must be TRUE TODAY, not from old data: for Jupiter's Great Red Spot say only "पृथ्वी से बड़ा" (it is about 1.3 Earths wide now), never 2 Earths. Same care for any shrinking/changing record.
+- FIDELITY: "say" must keep the exact numeric relationship AND its base from the fact. If the fact is "the Sun holds 99.86% of the solar system's total mass", say "सौर मंडल के कुल द्रव्यमान का 99.86%" - never flip it into "बाकी सभी ग्रहों से 99.86% अधिक". A percentage without its true base is a FAIL.
+- NEVER invent causes, mechanisms or explanations not in the claim: for "अंतरिक्ष में ध्वनि नहीं होती" do NOT add wave-conversion or particle theories. State the fact, then only widely-known true context.`;
 
 async function fetchPage(u) {
   const UAS = ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36', 'Mozilla/5.0 (compatible; OrbixFacts/1.0)'];
@@ -139,13 +141,13 @@ async function semanticVerify(kept) {
         if (r.ok) txt = String(await r.text()).replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
       }
     } catch { /* skip */ }
-    if (txt && txt.length > 200) items.push({ i: k + 1, claim: String(x.s.claim || ''), source: txt.slice(0, 3500) });
+    if (txt && txt.length > 200) items.push({ i: k + 1, claim: String(x.s.claim || ''), say: String(x.s.say || ''), source: txt.slice(0, 3500) });
     await new Promise(r => setTimeout(r, 400));
   }
   if (!items.length) return new Set();
   try {
     const m = await chatCompletion({ tools: [], messages: [
-      { role: 'system', content: 'You are a strict fact checker for a Hindi facts video. For each item decide whether the SOURCE explicitly supports the CLAIM: the exact number with the exact unit AND the exact subject must match (58 minutes vs 243 days is a FAIL; a number that appears about a different planet is a FAIL; unit mismatches like hours vs days are a FAIL). Return ONLY {"verdicts":[{"i":1,"ok":true}]}; include every item.' },
+      { role: 'system', content: 'You are a strict fact checker for a Hindi facts video. For each item decide whether the SOURCE explicitly supports the CLAIM: the exact number with the exact unit AND the exact subject must match (58 minutes vs 243 days is a FAIL; a number that appears about a different planet is a FAIL; unit mismatches like hours vs days are a FAIL). ALSO fail the item when the SAY (spoken Hindi) distorts the fact: a different number, a flipped comparison (e.g. 99.86 percent of total mass spoken as 99.86 percent MORE than the other planets), a missing percentage base, or an invented cause/mechanism the source does not state. Return ONLY {"verdicts":[{"i":1,"ok":true}]}; include every item.' },
       { role: 'user', content: JSON.stringify(items) }] });
     const j = jsonOf(m.content);
     const okSet = new Set((j && Array.isArray(j.verdicts) ? j.verdicts : []).filter(v => v && v.ok).map(v => v.i | 0));
@@ -208,8 +210,9 @@ export async function factsScript(job, VideoJob) {
   const scenes = spec.scenes.filter((s, i) => keepIdx.has(i));
   // Renumber badges 1..N in kept order.
   let b = 1;
+  const PERSON_RX = /\b(person|people|man|woman|men|women|girl|boy|child|kid|teen|human|face|portrait|silhouette|astronaut|scientist|crowd|viewer|lady|guy|character|figure)\b/i;
   job.scenes = scenes.map(s => ({
-    act: s.badge ? 'fact' : 'frame', prompt: String(s.visual || '').slice(0, 380), say: String(s.say || '').slice(0, 300),
+    act: s.badge ? 'fact' : 'frame', prompt: (v => { const clean = String(v || '').split(/(?<=[.!?])\s+/).filter(x => x && !PERSON_RX.test(x)).join(' ').trim(); return (clean || 'dramatic cosmic vista of stars and nebula, topic concept art').slice(0, 380); })(s.visual), say: String(s.say || '').slice(0, 300),
     kw: String(s.kw || '').replace(/\\n/g, '\n').slice(0, 60), state: 'wait', tries: 0, t0: 0, t1: 0,
     badge: s.badge ? String(b++) : '',
   }));
