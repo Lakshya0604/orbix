@@ -322,6 +322,7 @@ export async function factsStitch(job, { VideoJob, VideoBlob, blobBytes, fontsDi
     }
     total = await durOf(voiceFile);
     if (!total) throw new Error('The voice track is empty.');
+    if (total > 58) { const t = Math.min(1.3, total / 52); const sped = path.join(dir, 'voice_fast.wav'); try { await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', voiceFile, '-af', `atempo=${t.toFixed(3)}`, sped], { timeout: 120000 }); const nd = await durOf(sped); if (nd && nd < total) { voiceFile = sped; total = nd; job.note = `voice sped atempo=${t.toFixed(2)}`; } } catch (e) { console.error('facts speedup', String(e.message).slice(0, 100)); } }
     if (total < 45) { const t = Math.max(0.8, total / 46); const stretched = path.join(dir, 'voice_slow.wav'); try { await run(ffmpegPath, ['-y', '-loglevel', 'error', '-i', voiceFile, '-af', `atempo=${t.toFixed(3)}`, stretched], { timeout: 120000 }); const nd = await durOf(stretched); if (nd && nd > total) { voiceFile = stretched; total = nd; job.note = `voice stretched atempo=${t.toFixed(2)}`; } } catch (e) { console.error('facts stretch', String(e.message).slice(0, 100)); } }
     // scene boundaries: weight by spoken words, snap to silences
     const sd = await run(ffmpegPath, ['-i', voiceFile, '-af', 'silencedetect=noise=-33dB:d=0.12', '-f', 'null', '-'], { timeout: 60000 }).catch(e => ({ stderr: e.stderr || '' }));
