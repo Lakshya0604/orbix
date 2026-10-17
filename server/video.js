@@ -11,6 +11,7 @@ import { chatCompletion } from './llm.js';
 import { hordePanel, geminiTTS } from './pipelines/providers.js';
 import { generateClip, generateSpeech, generateSpeechEL, generateAgnesClip, generateImage, generateImageCF, generateImageGemini, generateWithReference, generateInbetweens, transcribeSong } from './media.js';
 import { buildLyricsAss, headerEvent, probeDuration as probeDur, buildTrack, renderArgs as amvRenderArgs, mapTiming, pickCuts, buildThumb, downloadTo } from './pipelines/amv.js';
+import { factsScript, makeFactsScene, factsStitch } from './pipelines/facts.js';
 import { amvYoutubeUpload } from './amv-upload.js';
 const { Schema, model } = mongoose; const run = promisify(execFile);
 
@@ -38,8 +39,8 @@ const sanitizeKw = (kw, subject, shot) => {
 export const VideoJob = model('VideoJob', new Schema({
   userId: { type: Schema.Types.ObjectId, index: true }, topic: String, title: { type: String, default: '' },
   status: { type: String, default: 'queued', index: true }, // queued, scripting, clips, stitching, done, failed
-  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, manhwa: { type: Boolean, default: false }, panels: { type: Boolean, default: false }, story: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, locDesc: { type: String, default: '' }, panelStats: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, landscape: { type: Boolean, default: false }, startedAt: Date, fileDeletedAt: Date,
-  amv: { type: Boolean, default: false }, animeUrl: { type: String, default: '' },
+  scenes: [{ act: { type: String, default: '' }, prompt: String, kw: { type: String, default: '' }, say: { type: String, default: '' }, state: { type: String, default: 'wait' }, tries: { type: Number, default: 0 }, t0: { type: Number, default: 0 }, t1: { type: Number, default: 0 }, badge: { type: String, default: '' } }], error: String, note: String, mode: { type: String, default: 'ai' }, long: { type: Boolean, default: false }, char: { type: Boolean, default: false }, subject: { type: String, default: '' }, lyric: { type: Boolean, default: false }, manhwa: { type: Boolean, default: false }, panels: { type: Boolean, default: false }, story: { type: Boolean, default: false }, songDur: { type: Number, default: 0 }, charDesc: { type: String, default: '' }, locDesc: { type: String, default: '' }, panelStats: { type: String, default: '' }, stage: { type: String, default: '' }, usedStock: { type: [Number], default: [] }, scenesWanted: { type: Number, default: 0 }, landscape: { type: Boolean, default: false }, startedAt: Date, fileDeletedAt: Date,
+  amv: { type: Boolean, default: false }, animeUrl: { type: String, default: '' }, facts: { type: Boolean, default: false }, factsMeta: { type: String, default: '' },
   lockUntil: { type: Date, default: null }, bytes: { type: Number, default: 0 }, voiceVia: { type: String, default: '' },
 }, { timestamps: true }));
 export const VideoBlob = model('VideoBlob', new Schema({ jobId: { type: Schema.Types.ObjectId, index: true }, kind: String, idx: Number, data: Buffer, gen: { type: Boolean, default: false } }, { timestamps: true }));
@@ -82,7 +83,7 @@ export async function sweepBlobs(limit = 40) {
 
 
 export const MAX_ACTIVE = 1, MAX_PER_DAY = 4, SCENES = 4, LONG_SCENES = 14;
-export async function startJob(userId, topic, long = false, char = false, scenesWanted = 0, sys = false, landscape = false, manhwa = false, panels = false, story = false) {
+export async function startJob(userId, topic, long = false, char = false, scenesWanted = 0, sys = false, landscape = false, manhwa = false, panels = false, story = false, facts = false) {
   const t = String(topic || '').trim().slice(0, 200);
   if (t.length < 3) throw Object.assign(new Error('Tell me what the video is about.'), { status: 400 });
   await VideoJob.updateMany({ userId, status: { $nin: ['done', 'failed', 'queued'] }, updatedAt: { $lt: new Date(Date.now() - 2 * 3600000) }, stage: { $not: /quota/i } }, { status: 'failed', error: 'This one got stuck (the server restarted). Please start it again.' });
@@ -90,7 +91,7 @@ export async function startJob(userId, topic, long = false, char = false, scenes
   if (await VideoJob.countDocuments({ userId, status: { $nin: ['done', 'failed'] } }) >= MAX_ACTIVE) throw Object.assign(new Error('One video is already being made. Wait for it to finish.'), { status: 429 });
   if (await VideoJob.countDocuments({ userId, createdAt: { $gt: new Date(Date.now() - 86400000) } }) >= MAX_PER_DAY) throw Object.assign(new Error(`Free limit: ${MAX_PER_DAY} videos per day.`), { status: 429 });
   }
-  return VideoJob.create({ userId, topic: t, long: !!long, char: !!char, scenesWanted: Math.min(160, Math.max(0, Math.round(scenesWanted) || 0)), landscape: !!landscape, manhwa: !!manhwa, panels: !!panels || !!story, story: !!story, startedAt: new Date() });
+  return VideoJob.create({ userId, topic: t, long: !!long, char: !!char, scenesWanted: Math.min(160, Math.max(0, Math.round(scenesWanted) || 0)), landscape: !!landscape, manhwa: !!manhwa, panels: !!panels || !!story, story: !!story, facts: !!facts, startedAt: new Date() });
 }
 
 export async function startLyricJob(userId, title, buf) {
@@ -536,6 +537,7 @@ async function makeScene(job, i) {
   job.scenes[i].state = 'ok'; await job.save();
 }
 async function step(job) {
+  if (job.facts && (job.status === 'queued' || job.status === 'scripting')) { job.status = 'scripting'; job.stage = 'Writing and verifying the facts script'; await job.save(); return factsScript(job, VideoJob); }
   if (job.amv && (job.status === 'queued' || job.status === 'scripting')) { job.status = 'scripting'; await job.save(); return amvPrepare(job); }
   if (job.lyric && (job.status === 'queued' || job.status === 'scripting')) { job.status = 'scripting'; await job.save(); return lyricScript(job); }
   if (job.status === 'queued' || job.status === 'scripting') { job.status = 'scripting'; job.stage = job.long ? 'Planning the story' : 'Writing the script'; await job.save(); return script(job); }
@@ -543,7 +545,7 @@ async function step(job) {
     if (!job.lyric && !job.panels) { const legacy = await VideoBlob.findOne({ jobId: job._id, kind: 'clip', gen: { $ne: true } }).select('_id').lean(); if (legacy) { await VideoBlob.deleteMany({ jobId: job._id, kind: 'clip' }); job.scenes.forEach(s => { s.state = 'wait'; s.tries = 0; }); job.note = 'Re-making every scene as AI-generated animation (no stock footage)'; await job.save(); } }
     const i = job.scenes.findIndex(s => s.state === 'wait');
     if (i < 0) { const ok = job.scenes.filter(s => s.state === 'ok').length; if (ok < 2) throw new Error('Not enough clips could be made. Please try again.'); job.status = 'stitching'; job.stage = 'Joining clips with the voice'; return job.save(); }
-    try { await withTimeout(makeScene(job, i), 170000, `Clip ${i + 1}`); }
+    try { if (job.facts) await withTimeout(makeFactsScene(job, i, VideoJob, VideoBlob, blobBytes), 170000, `Scene ${i + 1}`); else await withTimeout(makeScene(job, i), 170000, `Clip ${i + 1}`); }
     catch (e) {
       console.error('scene', i, e.message.slice(0, 140)); job = await VideoJob.findById(job._id); if (!job) return;
       const sc = job.scenes[i];
@@ -554,7 +556,7 @@ async function step(job) {
     }
     return;
   }
-  if (job.status === 'stitching') return job.amv ? stitchAmv(job) : job.lyric ? stitchLyric(job) : stitch(job);
+  if (job.status === 'stitching') return job.facts ? factsStitch(job, { VideoJob, VideoBlob, blobBytes, fontsDir, durOf: dur }) : job.amv ? stitchAmv(job) : job.lyric ? stitchLyric(job) : stitch(job);
 }
 async function stitchAmv(job) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbix-m-'));

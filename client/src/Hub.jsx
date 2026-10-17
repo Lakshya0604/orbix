@@ -99,11 +99,12 @@ export default function Hub({ user, dark, setDark, logout }) {
   const [vChar, setVChar] = useState(false);
   const [vPanels, setVPanels] = useState(false);
   const [vStory, setVStory] = useState(false);
+  const [vFacts, setVFacts] = useState(false);
   const activeVid = vids.jobs.some(j => !['done', 'failed'].includes(j.status));
   useEffect(() => { loadVids(); }, [loadVids]);
   useEffect(() => { const t = setInterval(loadVids, activeVid ? 4000 : 8000); return () => clearInterval(t); }, [activeVid, loadVids]);
   const activeJob = vids.jobs.find(j => !['done', 'failed'].includes(j.status));
-  const makeVid = async e => { e.preventDefault(); setVErr(''); try { await api('/api/videos', { method: 'POST', body: { topic: vTopic, long: vLong, char: vChar && !vPanels && !vStory, panels: vPanels && !vStory, story: vStory } }); setVTopic(''); loadVids(); } catch (x) { setVErr(x.message); } };
+  const makeVid = async e => { e.preventDefault(); setVErr(''); try { await api('/api/videos', { method: 'POST', body: { topic: vTopic, long: vLong, char: vChar && !vPanels && !vStory && !vFacts, panels: vPanels && !vStory && !vFacts, story: vStory && !vFacts, facts: vFacts } }); setVTopic(''); loadVids(); } catch (x) { setVErr(x.message); } };
   const fetchVid = async (id, dl) => { const r = await fetch(`/api/videos/${id}/file${dl ? '?dl=1' : ''}`, { headers: { authorization: `Bearer ${token()}` } }); if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Could not load the video.'); } return URL.createObjectURL(await r.blob()); };
   const playVid = async id => { try { setVPlay({ id, url: await fetchVid(id) }); } catch (x) { setVErr(x.message); } };
   const saveVid = async (id, name) => { try { const u = await fetchVid(id, true); const a = document.createElement('a'); a.href = u; a.download = `${(name || 'orbix-short').replace(/[^\w]+/g, '-').slice(0, 40)}.mp4`; a.click(); setTimeout(() => { URL.revokeObjectURL(u); loadVids(); }, 3000); } catch (x) { setVErr(x.message); } };
@@ -259,9 +260,10 @@ export default function Hub({ user, dark, setDark, logout }) {
               {vErr && <div className="msg err" role="alert">{vErr}</div>}
               <div className="vid-opts">
                 <label className={'opt' + (vLong ? ' on' : '')}><input type="checkbox" checked={vLong} onChange={e => setVLong(e.target.checked)} disabled={!vids.enabled} /><b>Long story</b><small>~2 min full story · 8-10 min to make</small></label>
-                <label className={'opt' + (vPanels ? ' on' : '')}><input type="checkbox" checked={vPanels} onChange={e => { const c = e.target.checked; setVPanels(c); if (c) { setVStory(false); setVChar(false); } }} disabled={!vids.enabled} /><b>Anime panels</b><small>cinematic panels + AI narrator</small></label>
-                <label className={'opt' + (vStory ? ' on' : '')}><input type="checkbox" checked={vStory} onChange={e => { const c = e.target.checked; setVStory(c); if (c) { setVPanels(false); setVChar(false); } }} disabled={!vids.enabled} /><b>Horror story</b><small>fixed character · branded intro</small></label>
-                <label className={'opt' + (vChar ? ' on' : '')}><input type="checkbox" checked={vChar} onChange={e => { const c = e.target.checked; setVChar(c); if (c) { setVPanels(false); setVStory(false); } }} disabled={!vids.enabled} /><b>Same character</b><small>one animated hero in every scene</small></label>
+                <label className={'opt' + (vPanels ? ' on' : '')}><input type="checkbox" checked={vPanels} onChange={e => { const c = e.target.checked; setVPanels(c); if (c) { setVStory(false); setVChar(false); setVFacts(false); } }} disabled={!vids.enabled} /><b>Anime panels</b><small>cinematic panels + AI narrator</small></label>
+                <label className={'opt' + (vStory ? ' on' : '')}><input type="checkbox" checked={vStory} onChange={e => { const c = e.target.checked; setVStory(c); if (c) { setVPanels(false); setVChar(false); setVFacts(false); } }} disabled={!vids.enabled} /><b>Horror story</b><small>fixed character · branded intro</small></label>
+                <label className={'opt' + (vChar ? ' on' : '')}><input type="checkbox" checked={vChar} onChange={e => { const c = e.target.checked; setVChar(c); if (c) { setVPanels(false); setVStory(false); setVFacts(false); } }} disabled={!vids.enabled} /><b>Same character</b><small>one animated hero in every scene</small></label>
+                <label className={'opt' + (vFacts ? ' on' : '')}><input type="checkbox" checked={vFacts} onChange={e => { const c = e.target.checked; setVFacts(c); if (c) { setVPanels(false); setVStory(false); setVChar(false); setVLong(false); } }} disabled={!vids.enabled} /><b>Facts Short</b><small>4 verified facts · captions + keyword boxes · vertical</small></label>
               </div>
               <details className="vid-adv">
                 <summary>🎵 Lyric video <span>pick a song - words on screen in sync, matching footage</span></summary>
