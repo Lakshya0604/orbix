@@ -33,19 +33,35 @@ Rules:
 - "kw" = keyword box, TWO lines separated by \\n: line 1 = the headline number/word in Hindi (max 3 words, e.g. "243 दिन"), line 2 = short kicker in Hindi (max 3 words, e.g. "साल 225 दिन").
 - "emoji" = exactly one unicode emoji matching the scene.
 - "visual" = ONE English sentence describing a vivid illustration of THIS line (what is visible, no text in image).
-- For the 4 fact scenes: "claim" = the key checkable statement, "url" = a primary or authoritative source page (NASA, Britannica, Smithsonian, NIH/NCBI, NCERT, official museum or government sites), "evidence" = the exact number as digits then | then 2-3 English keywords that must appear on that page (e.g. "243|Venus|rotation|day"). Facts must be real, current, non-political, non-religious.`;
+- For the 4 fact scenes: "claim" = the key checkable statement, "url" = a primary or authoritative source page (NASA, Britannica, Smithsonian, NIH/NCBI, NCERT, official museum or government sites). Prefer deep stable article pages (e.g. britannica.com/place/Venus-planet, science.nasa.gov/venus/venus-facts), never homepages or search pages, and only URLs you are highly confident exist, "evidence" = the exact number as digits then | then 2-3 English keywords that must appear on that page (e.g. "243|Venus|rotation|day"). Facts must be real, current, non-political, non-religious.`;
 
+async function fetchPage(u) {
+  const UAS = ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36', 'Mozilla/5.0 (compatible; OrbixFacts/1.0)'];
+  let last = null;
+  for (const ua of UAS) {
+    try {
+      const r = await fetch(u, { redirect: 'follow', signal: AbortSignal.timeout(25000), headers: { 'user-agent': ua, 'accept-language': 'en-US,en;q=0.9', accept: 'text/html,application/xhtml+xml' } });
+      if (r.ok) return r;
+      last = `http ${r.status}`;
+      if (r.status !== 403 && r.status !== 429) return r;
+    } catch (e) { last = String(e.message).slice(0, 60); }
+  }
+  throw new Error(last || 'fetch failed');
+}
 async function verifyFact(f) {
   try {
     const u = await assertPublicUrl(String(f.url || ''));
-    const r = await fetch(u, { redirect: 'follow', signal: AbortSignal.timeout(25000), headers: { 'user-agent': 'Mozilla/5.0 (compatible; OrbixFacts/1.0)' } });
+    const r = await fetchPage(u);
     if (!r.ok) return { ok: false, why: `http ${r.status}` };
     const html = await r.text();
-    const text = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').toLowerCase();
+    let text = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').toLowerCase();
     const parts = String(f.evidence || '').split('|').map(s => s.trim()).filter(Boolean);
     const num = parts[0] || '';
-    const kws = parts.slice(1);
-    const numOk = num ? text.includes(num.toLowerCase()) : true;
+    const kws = parts.slice(1).filter(k => k.length > 2);
+    const flat = text.replace(/[,\u00a0]/g, '');
+    const numFlat = num.replace(/,/g, '').toLowerCase();
+    const numInt = numFlat.split('.')[0];
+    const numOk = !num || flat.includes(numFlat) || (numInt.length >= 2 && flat.includes(numInt));
     const kwOk = kws.filter(k => text.includes(k.toLowerCase())).length >= Math.min(2, kws.length);
     return { ok: numOk && kwOk, why: numOk ? (kwOk ? '' : 'keywords missing') : 'number missing' };
   } catch (e) { return { ok: false, why: String(e.message).slice(0, 80) }; }
@@ -76,7 +92,7 @@ export async function factsScript(job, VideoJob) {
     } catch { /* keep originals dropped below */ }
   }
   const keptFacts = factIdx.filter(x => x.s._verified);
-  if (keptFacts.length < 3) throw new Error('Could not verify at least 3 facts against their sources. Try a different topic.');
+  if (keptFacts.length < 3) { job.note = 'verify failed: ' + failed.map(f => `${(f.s.url || '').slice(0, 60)}=${f.why}`).join(' | ').slice(0, 480); await job.save().catch(() => {}); throw new Error('Could not verify at least 3 facts against their sources. Try a different topic.'); }
   const keepIdx = new Set([0, spec.scenes.length - 1, ...keptFacts.map(x => x.i)]);
   const scenes = spec.scenes.filter((s, i) => keepIdx.has(i));
   // Renumber badges 1..N in kept order.
