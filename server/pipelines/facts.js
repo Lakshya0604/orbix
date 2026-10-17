@@ -29,7 +29,7 @@ Shape: {"strip":"...","fiction":false,"scenes":[{"say":"...","kw":"...","emoji":
 Rules:
 - Exactly 10 scenes. Scene 1 = hook (badge empty, no claim/url). Scenes 2-9 = EIGHT candidate numbered facts (badge "1".."8"); only the 5 that verify will be used, so make all 8 strong. Scene 10 = ending: ask viewers to comment their favourite fact number and follow (badge empty, no claim/url).
 - "strip" = short Hindi top-bar title, e.g. "अंतरिक्ष के 5 चौंकाने वाले सच (strip ka number final kept facts se badal diya jayega)". If the topic is fiction, set fiction true and start the strip with "(काल्पनिक)".
-- "say" = spoken Hindi in Devanagari. LENGTH MATTERS: hook 12-18 words and must grab instantly; each fact scene 2 full sentences of 18-26 words total (state the fact with its number, then why it is amazing); ending 12-18 words. Each fact scene must be 18-26 spoken words; hook 12-18; ending 12-18 (about 45-58 seconds). Number facts with "नंबर एक/दो/तीन/चार/पांच". Simple words, energetic.
+- "say" = spoken Hindi in Devanagari. LENGTH MATTERS: hook 12-18 words and must grab instantly; each fact scene 2-3 full sentences of 24-32 words total (state the fact with its number, then why it is amazing); ending 12-18 words. Each fact scene must be 24-32 spoken words; hook 12-18; ending 12-18 (about 45-58 seconds). Number facts with "नंबर एक/दो/तीन/चार/पांच". Simple words, energetic.
 - "kw" = keyword box, TWO lines separated by \\n: line 1 = the headline number/word in Hindi (max 3 words, MUST contain the fact number in digits, e.g. "243 दिन"), line 2 = short kicker in Hindi (max 3 words, e.g. "साल 225 दिन"). For hook and ending scenes kw can be empty.
 - "emoji" = exactly one unicode emoji matching the scene.
 - "visual" = ONE English sentence describing a vivid illustration of THIS line (objects/places/phenomena only - never any person, human, face or character; no text in image).
@@ -135,7 +135,7 @@ export async function factsScript(job, VideoJob) {
   const wc = () => { const sc = spec.scenes; const pick = [sc[0], ...sc.slice(1, 6), sc[sc.length - 1]].filter(Boolean); return pick.reduce((n, x) => n + String(x.say || '').split(/\s+/).filter(Boolean).length, 0); };
   for (let a = 0; a < 2 && wc() < 100; a++) {
     try {
-      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}\nYour previous draft was only ${wc()} spoken words - far too short. Rewrite the FULL script (hook + 8 candidate facts + ending); every fact scene needs 2 full sentences of 18-26 words. Keep the same facts and sources.` }] });
+      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}\nYour previous draft was only ${wc()} spoken words - far too short. Rewrite the FULL script (hook + 8 candidate facts + ending); every fact scene needs 2-3 full sentences of 24-32 words. Keep the same facts and sources.` }] });
       const j = jsonOf(m.content);
       if (j && Array.isArray(j.scenes) && j.scenes.length >= 8) {
         const oldWc = wc(); const cand = j; cand.scenes = cand.scenes.slice(0, 10);
