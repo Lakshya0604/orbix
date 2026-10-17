@@ -215,13 +215,17 @@ export async function factsScript(job, VideoJob) {
   const scenes = spec.scenes.filter((s, i) => keepIdx.has(i));
   // Renumber badges 1..N in kept order.
   let b = 1;
-  const PERSON_RX = /\b(person|people|man|woman|men|women|girl|boy|child|kid|teen|human|face|portrait|silhouette|astronaut|scientist|crowd|viewer|lady|guy|character|figure)\b/i;
+  const PERSON_RX = /\b(person|people|man|woman|men|women|girl|boy|child|kid|teen|human|face|portrait|silhouette|astronaut|scientist|crowd|viewer|lady|guy|character|figure|hand|hands|arm|arms|finger|fingers|leg|legs|limb|limbs|body|bodies|eye|eyes|skin)\b/i;
   job.scenes = scenes.map(s => ({
     act: s.badge ? 'fact' : 'frame', prompt: (v => { const clean = String(v || '').split(/(?<=[.!?])\s+/).filter(x => x && !PERSON_RX.test(x)).join(' ').trim(); return (clean || 'dramatic cosmic vista of stars and nebula, topic concept art').slice(0, 380); })(s.visual), say: String(s.say || '').slice(0, 300),
-    kw: String(s.kw || '').replace(/\\n/g, '\n').slice(0, 60), state: 'wait', tries: 0, t0: 0, t1: 0,
+    kw: String(s.kw || '').replace(/V(?=[\u0900-\u097F])/g, '\u0935').replace(/\\n/g, '\n').slice(0, 60), state: 'wait', tries: 0, t0: 0, t1: 0,
     badge: s.badge ? String(b++) : '',
   }));
   const stripTxt = String(spec.strip || job.topic).replace(/(के\s+|की\s+)(\d+|एक|दो|तीन|चार|पाँच|पांच|छह)(\s+)/, `$1${keptFacts.length}$3`).slice(0, 60);
+  // Hook say must match the kept count too ("पांच तथ्य" spoken while 4 shown = viewer-noticeable mismatch).
+  const NUMW = ['एक','दो','तीन','चार','पाँच','छह','सात','आठ','नौ','दस','ग्यारह','बारह'];
+  const hookSay = job.scenes[0] && !job.scenes[0].badge ? job.scenes[0] : null;
+  if (hookSay) hookSay.say = hookSay.say.replace(/(पाँच|पांच|छह|सात|आठ|नौ|दस|ग्यारह|बारह|\d+)(?=\s+(?:[\u0900-\u097F]+\s+){0,2}(?:तथ्य|सच|facts))/, NUMW[Math.min(keptFacts.length, 12) - 1]);
   job.factsMeta = JSON.stringify({ strip: stripTxt, fiction: !!spec.fiction, emojis: scenes.map(s => String(s.emoji || '').slice(0, 8)), sources: keptFacts.map(x => String(x.s.url).slice(0, 200)) });
   job.status = 'clips'; job.stage = 'Drawing scene 1'; await job.save();
 }
