@@ -201,7 +201,23 @@ export async function factsScript(job, VideoJob) {
   }
   let keptFacts = factIdx.filter(x => x.s._verified).slice(0, 5);
   // semantic pass: source text must support the exact claim (subject + number + unit) - substring checks pass hallucinations like "Venus day = 58 minutes"
-  try { const badSem = await semanticVerify(keptFacts); if (badSem.size) keptFacts = keptFacts.filter((x, k) => !badSem.has(k)); } catch { /* keep */ }
+  try {
+    let badSem = await semanticVerify(keptFacts);
+    if (badSem.size) {
+      // Repair round: rewrite distorted spoken lines strictly from their verified claims instead of dropping straight away.
+      const idxs = [...badSem];
+      const ask = idxs.map((k, n) => `Item ${n + 1}:
+CLAIM (verified, must be stated exactly): ${keptFacts[k].s.claim}
+CURRENT SAY (distorted): ${keptFacts[k].s.say}`).join('\n---\n');
+      try {
+        const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: 'You repair spoken Hindi lines for a facts video. For each item return {"fixes":[{"i":1,"say":"..."}]} - a rewritten "say" that states the CLAIM exactly: same number, same unit, same subject, same comparison base, NO invented cause/mechanism, simple energetic Hindi Devanagari, 24-32 words. Include every item.' }, { role: 'user', content: ask }] });
+        const j = jsonOf(m.content);
+        for (const f of (j && Array.isArray(j.fixes) ? j.fixes : [])) { const idx = idxs[(f.i | 0) - 1]; if (idx != null && f.say) keptFacts[idx].s.say = String(f.say).slice(0, 300); }
+        badSem = await semanticVerify(keptFacts);
+      } catch { /* fall through to drop */ }
+      if (badSem.size) keptFacts = keptFacts.filter((x, k) => !badSem.has(k));
+    }
+  } catch { /* keep */ }
   // kw accuracy pass: the box must match the fact exactly (units, numbers) - a wrong unit on screen is worse than no box.
   try {
     const askKw = keptFacts.map((x, k) => `${k + 1}. claim: ${x.s.claim}
