@@ -186,19 +186,42 @@ Rules:
 - "endingSay" = 12-18 words: ask viewers to comment their favourite fact number and follow. "endingEmoji" one emoji.
 - "strip" = short Hindi top-bar title, e.g. "समुद्र के 5 चौंकाने वाले सच" (use the exact given fact count).`;
 
+async function wikiExtract(title, hdr, api) {
+  const er = await fetch(`${api}?action=query&prop=extracts&explaintext=1&exsectionformat=plain&redirects=1&titles=${encodeURIComponent(title)}&format=json`, { headers: hdr, signal: AbortSignal.timeout(25000) }).catch(() => null);
+  if (!er || !er.ok) return null;
+  const ej = await er.json().catch(() => null);
+  const page = Object.values(ej?.query?.pages || {})[0] || {};
+  const text = String(page.extract || '');
+  return text.length > 800 ? { title: page.title || title, text } : null;
+}
+
 async function gatherSources(topic) {
   const api = 'https://en.wikipedia.org/w/api.php';
   const hdr = { 'user-agent': 'OrbixFacts/1.0 (fact-check; contact: site owner)' };
   const out = [];
-  const sr = await fetch(`${api}?action=query&list=search&srsearch=${encodeURIComponent(topic)}&format=json&srlimit=6`, { headers: hdr, signal: AbortSignal.timeout(20000) }).catch(() => null);
-  const hits = sr && sr.ok ? ((await sr.json())?.query?.search || []) : [];
-  for (const h of hits.slice(0, 5)) {
-    await new Promise(r => setTimeout(r, 600));
-    const er = await fetch(`${api}?action=query&prop=extracts&explaintext=1&exsectionformat=plain&titles=${encodeURIComponent(h.title)}&format=json`, { headers: hdr, signal: AbortSignal.timeout(25000) }).catch(() => null);
-    if (!er || !er.ok) continue;
-    const ej = await er.json().catch(() => null);
-    const text = String(Object.values(ej?.query?.pages || {})[0]?.extract || '');
-    if (text.length > 800) out.push({ title: h.title, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(h.title.replace(/ /g, '_'))}`, text: text.slice(0, 7000) });
+  const seen = new Set();
+  // Topics arrive in Hindi; en.wikipedia search on a Hindi string returns zero hits.
+  // Ask the LLM only for the English translation + likely-real article titles (lookup keys, not facts).
+  let cand = [];
+  try {
+    const m = await chatCompletion({ tools: [], messages: [
+      { role: 'system', content: 'Given a Hindi YouTube facts-video topic, reply ONLY valid JSON: {"english":"short English translation","titles":["up to 6 exact English Wikipedia article titles most likely to contain surprising numeric facts about the topic"]}. Use only real broad article titles you are highly confident exist (e.g. "Ocean", "Blue whale", "Mariana Trench"), never niche or made-up ones.' },
+      { role: 'user', content: `Topic: ${topic}` }] });
+    const j = jsonOf(m.content);
+    if (j && Array.isArray(j.titles)) cand = j.titles.map(String).slice(0, 6);
+    if (j && j.english) cand.push(String(j.english));
+  } catch { /* fall through */ }
+  if (!cand.length) cand.push(topic);
+  for (const c of cand) {
+    if (out.length >= 5) break;
+    await new Promise(r => setTimeout(r, 500));
+    let hit = await wikiExtract(c, hdr, api);
+    if (!hit) {
+      const sr = await fetch(`${api}?action=query&list=search&srsearch=${encodeURIComponent(c)}&format=json&srlimit=3`, { headers: hdr, signal: AbortSignal.timeout(20000) }).catch(() => null);
+      const hits = sr && sr.ok ? ((await sr.json().catch(() => null))?.query?.search || []) : [];
+      for (const h of hits) { await new Promise(r => setTimeout(r, 500)); hit = await wikiExtract(h.title, hdr, api); if (hit) break; }
+    }
+    if (hit && !seen.has(hit.title)) { seen.add(hit.title); out.push({ title: hit.title, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(hit.title.replace(/ /g, '_'))}`, text: hit.text.slice(0, 7000) }); }
   }
   return out;
 }
