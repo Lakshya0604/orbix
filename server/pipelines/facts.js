@@ -164,97 +164,179 @@ async function semanticVerify(kept) {
   return new Set(); // judge unavailable twice: keep substring+wiki-verified facts rather than fail the job
 }
 
-export async function factsScript(job, VideoJob) {
-  let spec = null;
-  for (let a = 0; a < 3 && !spec; a++) {
+const EXTRACT_SYS = `You mine verifiable number-facts from given Wikipedia source texts for a Hindi facts video. Reply ONLY valid JSON, no double quotes inside values.
+Shape: {"facts":[{"claim":"one English sentence stating the fact","num":"the key number as digits","span":"the EXACT sentence copied VERBATIM from the source that contains the number and supports the claim","src":0}]}
+Rules:
+- Use ONLY the provided source texts. NEVER use outside knowledge or memory.
+- "span" must be copied word-for-word from the source with that index, and must contain the number as digits. One or two adjacent sentences maximum.
+- "claim" must restate exactly what the span says: same number, same unit, same subject, same comparison base. NO invented causes, mechanisms or explanations.
+- "src" = the [index] of the source the span came from.
+- Facts must be real, awe-inspiring, non-political, non-religious, and true today (avoid dated records that change, e.g. shrinking features).
+- Return 10-12 of the most surprising facts across all sources.`;
+
+const WRITER_SYS = `You write the Hindi creative layer of a YouTube Shorts FACTS video around GIVEN VERIFIED FACTS. Reply ONLY valid JSON, no double quotes inside values.
+Shape: {"strip":"...","hookSay":"...","hookEmoji":"...","endingSay":"...","endingEmoji":"...","scenes":[{"say":"...","kw":"...","emoji":"...","visual":"..."}]}
+Rules:
+- "scenes" = EXACTLY one entry per given fact, in the SAME order. Do not add, drop, reorder or change the facts.
+- "say" = spoken Hindi in Devanagari. Each fact scene 2-3 full sentences of 24-32 words total: state the fact EXACTLY (same number, same unit, same subject, same comparison base - if the fact is "the Sun holds 99.86% of the solar system's total mass", say "सौर मंडल के कुल द्रव्यमान का 99.86%", never flip it), then add only widely-known true context or awe. NEVER invent causes, mechanisms or explanations not in the fact. NEVER speak fact numbers (no "नंबर एक/दो") - an on-screen badge shows the number. Simple words, energetic.
+- "kw" = keyword box, TWO lines separated by \n: line 1 = the headline number+unit in Hindi FROM THE FACT (max 3 words, digits, e.g. "243 दिन"), line 2 = short kicker in Hindi (max 3 words). NEVER use the fact list position as that number.
+- "emoji" = exactly one unicode emoji matching the scene.
+- "visual" = ONE English sentence describing a vivid illustration of THIS line (objects/places/phenomena only - never any person, human, face or character; no text in image).
+- "hookSay" = 12-18 words, teases with a question ONLY ("क्या आप जानते हैं...?") and NEVER states a precise number, percentage, speed, size or quantitative claim. "hookEmoji" one emoji.
+- "endingSay" = 12-18 words: ask viewers to comment their favourite fact number and follow. "endingEmoji" one emoji.
+- "strip" = short Hindi top-bar title, e.g. "समुद्र के 5 चौंकाने वाले सच" (use the exact given fact count).`;
+
+async function gatherSources(topic) {
+  const api = 'https://en.wikipedia.org/w/api.php';
+  const hdr = { 'user-agent': 'OrbixFacts/1.0 (fact-check; contact: site owner)' };
+  const out = [];
+  const sr = await fetch(`${api}?action=query&list=search&srsearch=${encodeURIComponent(topic)}&format=json&srlimit=6`, { headers: hdr, signal: AbortSignal.timeout(20000) }).catch(() => null);
+  const hits = sr && sr.ok ? ((await sr.json())?.query?.search || []) : [];
+  for (const h of hits.slice(0, 5)) {
+    await new Promise(r => setTimeout(r, 600));
+    const er = await fetch(`${api}?action=query&prop=extracts&explaintext=1&exsectionformat=plain&titles=${encodeURIComponent(h.title)}&format=json`, { headers: hdr, signal: AbortSignal.timeout(25000) }).catch(() => null);
+    if (!er || !er.ok) continue;
+    const ej = await er.json().catch(() => null);
+    const text = String(Object.values(ej?.query?.pages || {})[0]?.extract || '');
+    if (text.length > 800) out.push({ title: h.title, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(h.title.replace(/ /g, '_'))}`, text: text.slice(0, 7000) });
+  }
+  return out;
+}
+
+const normT = t => String(t || '').toLowerCase().replace(/[, ]/g, '').replace(/\s+/g, ' ').trim();
+
+async function semanticVerifyLocal(keptFacts) {
+  // Judge each kept fact's spoken line against its IN-MEMORY source text (already fetched - no refetch).
+  const items = keptFacts.map((f, k) => ({ i: k + 1, claim: f.claim, say: f.say, source: (f.span + '\n' + f.text).slice(0, 3500) }));
+  if (!items.length) return new Set();
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}` }] });
+      const m = await chatCompletion({ tools: [], messages: [
+        { role: 'system', content: 'You are a strict fact checker for a Hindi facts video. For each item decide whether the SOURCE explicitly supports the CLAIM: the exact number with the exact unit AND the exact subject must match (58 minutes vs 243 days is a FAIL; a number that appears about a different planet is a FAIL; unit mismatches like hours vs days are a FAIL). ALSO fail the item when the SAY (spoken Hindi) states a DIFFERENT fact than the CLAIM: a changed number, a flipped comparison (e.g. 99.86 percent of total mass spoken as 99.86 percent MORE than the other planets), a missing or wrong percentage base, or a NEW specific scientific cause/mechanism the source does not support. Generic awe phrases and widely-known context are FINE - fail only factual distortions, never style. Return ONLY {"verdicts":[{"i":1,"ok":true}]}; include every item.' },
+        { role: 'user', content: JSON.stringify(items) }] });
       const j = jsonOf(m.content);
-      if (j && Array.isArray(j.scenes) && j.scenes.length >= 8) spec = j;
+      const verdicts = (j && Array.isArray(j.verdicts)) ? j.verdicts : [];
+      if (!verdicts.length) { console.error('facts judge empty/unparseable, attempt', attempt); continue; }
+      const okSet = new Set(verdicts.filter(v => v && v.ok).map(v => v.i | 0));
+      const bad = new Set();
+      for (const it of items) if (!okSet.has(it.i)) bad.add(it.i - 1);
+      return bad;
+    } catch { /* retry, then skip */ }
+  }
+  return new Set();
+}
+
+export async function factsScript(job, VideoJob) {
+  // EXTRACT-THEN-WRITE: fetch source pages FIRST, mine claims verbatim from them, then write the Hindi layer.
+  // The LLM never invents URLs or numbers - every number is verified as a verbatim substring of fetched text.
+  const sources = await gatherSources(job.topic);
+  if (sources.length < 2) { job.note = 'extract failed: could not fetch enough source pages'; await job.save().catch(() => {}); throw new Error('Could not fetch source pages for this topic. Try a different topic.'); }
+  let mined = [];
+  for (let a = 0; a < 2 && mined.length < 5; a++) {
+    try {
+      const srcBlock = sources.map((s, i) => `[${i}] ${s.title}\n${s.text}`).join('\n\n').slice(0, 30000);
+      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: EXTRACT_SYS }, { role: 'user', content: `Topic: ${job.topic}\nSources:\n${srcBlock}` }] });
+      const j = jsonOf(m.content);
+      for (const c of (j && Array.isArray(j.facts) ? j.facts : [])) {
+        const src = sources[c.src | 0]; if (!src) continue;
+        const span = String(c.span || '').trim();
+        const num = String(c.num || '').replace(/,/g, '').trim();
+        if (!span || !num || num.length < 1) continue;
+        const nSpan = normT(span), nHay = normT(src.text);
+        if (!nHay.includes(nSpan)) continue;              // span must be verbatim from the fetched page
+        if (!normT(num) || !nSpan.includes(normT(num))) continue; // number must be inside the span
+        if (!String(c.claim || '').trim()) continue;
+        if (mined.some(f => normT(f.claim) === normT(c.claim) || normT(f.span) === nSpan)) continue;
+        mined.push({ claim: String(c.claim).slice(0, 300), num, span, url: src.url, title: src.title, text: src.text });
+      }
+    } catch (e) { await new Promise(r => setTimeout(r, 4000 * (a + 1))); }
+  }
+  if (mined.length < 4) { job.note = `extract failed: only ${mined.length} verifiable facts found in ${sources.length} sources`; await job.save().catch(() => {}); throw new Error('Could not verify at least 4 facts against their sources. Try a different topic.'); }
+  const keptFacts = mined.slice(0, 5);
+  // Creative layer: Hindi script around the verified facts (LLM cannot change claims/numbers).
+  const factsList = keptFacts.map((f, k) => `${k + 1}. ${f.claim} (number: ${f.num})`).join('\n');
+  let wspec = null;
+  for (let a = 0; a < 3 && !wspec; a++) {
+    try {
+      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: WRITER_SYS }, { role: 'user', content: `Topic: ${job.topic}\nVerified facts (use EXACTLY these ${keptFacts.length}, same order):\n${factsList}` }] });
+      const j = jsonOf(m.content);
+      if (j && Array.isArray(j.scenes) && j.scenes.length === keptFacts.length && j.hookSay && j.endingSay) wspec = j;
     } catch (e) { await new Promise(r => setTimeout(r, 6000 * (a + 1))); }
   }
-  if (!spec) throw new Error('Could not write the facts script. Please try again.');
-  spec.scenes = spec.scenes.slice(0, 14);
-  // Too-short scripts make a 15-second video; ask once for a fuller cut.
-  const wc = () => { const sc = spec.scenes; const pick = [sc[0], ...sc.slice(1, 6), sc[sc.length - 1]].filter(Boolean); return pick.reduce((n, x) => n + String(x.say || '').split(/\s+/).filter(Boolean).length, 0); };
-  for (let a = 0; a < 2 && wc() < 100; a++) {
+  if (!wspec) throw new Error('Could not write the facts script. Please try again.');
+  // One length retry if the draft is far too short.
+  const wWords = x => String(x || '').split(/\s+/).filter(Boolean).length;
+  let totalW = wWords(wspec.hookSay) + wWords(wspec.endingSay) + wspec.scenes.reduce((n, s) => n + wWords(s.say), 0);
+  if (totalW < 110) {
     try {
-      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS }, { role: 'user', content: `Topic: ${job.topic}\nYour previous draft was only ${wc()} spoken words - far too short. Rewrite the FULL script (hook + 12 candidate facts + ending); every fact scene needs 2-3 full sentences of 24-32 words. Keep the same facts and sources.` }] });
+      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: WRITER_SYS }, { role: 'user', content: `Topic: ${job.topic}\nVerified facts (use EXACTLY these ${keptFacts.length}, same order):\n${factsList}\nYour previous draft was only ${totalW} spoken words - far too short. Every fact scene needs 2-3 full sentences of 24-32 words.` }] });
       const j = jsonOf(m.content);
-      if (j && Array.isArray(j.scenes) && j.scenes.length >= 8) {
-        const oldWc = wc(); const cand = j; cand.scenes = cand.scenes.slice(0, 14);
-        const candWc = cand.scenes.reduce((n, x) => n + String(x.say || '').split(/\s+/).filter(Boolean).length, 0);
-        if (candWc > oldWc) spec = cand;
+      if (j && Array.isArray(j.scenes) && j.scenes.length === keptFacts.length && j.hookSay && j.endingSay) {
+        const w2 = wWords(j.hookSay) + wWords(j.endingSay) + j.scenes.reduce((n, s) => n + wWords(s.say), 0);
+        if (w2 > totalW) { wspec = j; totalW = w2; }
       }
     } catch { /* keep best draft */ }
   }
-  // Verify the numbered facts against their sources; one LLM replacement round for failures.
-  const factIdx = spec.scenes.map((s, i) => ({ s, i })).filter(x => x.s.url && x.s.claim);
-  const failed = [];
-  for (const x of factIdx) { let v = await verifyFact(x.s); if (!v.ok) { const w = await wikiVerify(x.s).catch(() => ({ ok: false, why: 'wiki err' })); if (w.ok) { x.s.url = w.url; v = { ok: true, why: '' }; } else v.why += ` / ${w.why}`; } x.s._verified = v.ok; if (!v.ok) failed.push({ ...x, why: v.why }); }
-  if (failed.length) {
-    try {
-      const ask = failed.map(f => `Scene said: ${f.s.say} (source check failed: ${f.why})`).join('\n');
-      const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: SCRIPT_SYS + '\nReturn ONLY the replacement fact scenes array: {"scenes":[...]} with the same keys, one per failed fact, on the SAME topic. Every url must be a page you are confident contains the number.' }, { role: 'user', content: `Topic: ${job.topic}\nFailed facts:\n${ask}` }] });
-      const j = jsonOf(m.content);
-      const reps = (j && Array.isArray(j.scenes) ? j.scenes : []).slice(0, failed.length);
-      for (let k = 0; k < reps.length; k++) { let v = await verifyFact(reps[k]); if (!v.ok) { const w = await wikiVerify(reps[k]).catch(() => ({ ok: false })); if (w.ok) { reps[k].url = w.url; v = { ok: true }; } } if (v.ok) Object.assign(failed[k].s, reps[k], { _verified: true }); }
-    } catch { /* keep originals dropped below */ }
+  for (let k = 0; k < keptFacts.length; k++) {
+    keptFacts[k].say = String(wspec.scenes[k].say || '').slice(0, 300);
+    keptFacts[k].kw = String(wspec.scenes[k].kw || '');
+    keptFacts[k].emoji = String(wspec.scenes[k].emoji || '').slice(0, 8);
+    keptFacts[k].visual = String(wspec.scenes[k].visual || '');
   }
-  let keptFacts = factIdx.filter(x => x.s._verified).slice(0, 5);
-  // semantic pass: source text must support the exact claim (subject + number + unit) - substring checks pass hallucinations like "Venus day = 58 minutes"
+  // semantic pass: source text must support the exact claim (subject + number + unit) - in-memory, no refetch.
   try {
-    let badSem = await semanticVerify(keptFacts);
+    let badSem = await semanticVerifyLocal(keptFacts);
     if (badSem.size) {
-      // Repair round: rewrite distorted spoken lines strictly from their verified claims instead of dropping straight away.
       const idxs = [...badSem];
       const ask = idxs.map((k, n) => `Item ${n + 1}:
-CLAIM (verified, must be stated exactly): ${keptFacts[k].s.claim}
-CURRENT SAY (distorted): ${keptFacts[k].s.say}`).join('\n---\n');
+CLAIM (verified, must be stated exactly): ${keptFacts[k].claim}
+CURRENT SAY (distorted): ${keptFacts[k].say}`).join('\n---\n');
       try {
         const m = await chatCompletion({ tools: [], messages: [{ role: 'system', content: 'You repair spoken Hindi lines for a facts video. For each item return {"fixes":[{"i":1,"say":"..."}]} - a rewritten "say" that states the CLAIM exactly: same number, same unit, same subject, same comparison base, NO invented cause/mechanism, simple energetic Hindi Devanagari, 24-32 words. Include every item.' }, { role: 'user', content: ask }] });
         const j = jsonOf(m.content);
-        for (const f of (j && Array.isArray(j.fixes) ? j.fixes : [])) { const idx = idxs[(f.i | 0) - 1]; if (idx != null && f.say) keptFacts[idx].s.say = String(f.say).slice(0, 300); }
-        badSem = await semanticVerify(keptFacts);
+        for (const f of (j && Array.isArray(j.fixes) ? j.fixes : [])) { const idx = idxs[(f.i | 0) - 1]; if (idx != null && f.say) keptFacts[idx].say = String(f.say).slice(0, 300); }
+        badSem = await semanticVerifyLocal(keptFacts);
       } catch { /* fall through to drop */ }
-      if (badSem.size) keptFacts = keptFacts.filter((x, k) => !badSem.has(k));
+      if (badSem.size) for (const k of [...badSem].sort((a, b) => b - a)) keptFacts.splice(k, 1);
     }
   } catch { /* keep */ }
-  // kw accuracy pass: the box must match the fact exactly (units, numbers) - a wrong unit on screen is worse than no box.
+  if (keptFacts.length < 4) { job.note = 'semantic verify dropped below 4 facts'; await job.save().catch(() => {}); throw new Error('Could not verify at least 4 facts against their sources. Try a different topic.'); }
+  // kw accuracy pass: the box must match the fact exactly (units, numbers).
   try {
-    const askKw = keptFacts.map((x, k) => `${k + 1}. claim: ${x.s.claim}
-   kw: ${String(x.s.kw || '').replace(/\n/g, ' / ')}`).join('\n');
+    const askKw = keptFacts.map((x, k) => `${k + 1}. claim: ${x.claim}
+   kw: ${String(x.kw || '').replace(/\n/g, ' / ')}`).join('\n');
     const mk = await chatCompletion({ tools: [], messages: [{ role: 'system', content: 'You fact-check the on-screen keyword box of a Hindi facts Short against the verified claim. For EACH item return {"fixes":[{"i":1,"kw":"line1\nline2"}]} - only for items where the kw text is inaccurate (wrong number, wrong unit like घंटे vs दिन, wrong object) or uses the list position as its number. line1 = the headline number+unit FROM THE CLAIM (max 3 words, digits), line2 = short kicker (max 3 words). If an item is already accurate, omit it. Never invent a number not in the claim.' }, { role: 'user', content: askKw }] });
     const jk = jsonOf(mk.content);
-    for (const f of (jk && Array.isArray(jk.fixes) ? jk.fixes : [])) { const idx = (f.i | 0) - 1; if (idx >= 0 && idx < keptFacts.length && f.kw) keptFacts[idx].s.kw = String(f.kw).slice(0, 60); }
+    for (const f of (jk && Array.isArray(jk.fixes) ? jk.fixes : [])) { const idx = (f.i | 0) - 1; if (idx >= 0 && idx < keptFacts.length && f.kw) keptFacts[idx].kw = String(f.kw).slice(0, 60); }
   } catch { /* keep original kw */ }
-  if (keptFacts.length < 4) { job.note = 'verify failed: ' + failed.map(f => `${(f.s.url || '').slice(0, 60)}=${f.why}`).join(' | ').slice(0, 480); await job.save().catch(() => {}); throw new Error('Could not verify at least 4 facts against their sources. Try a different topic.'); }
-  const keepIdx = new Set([0, spec.scenes.length - 1, ...keptFacts.map(x => x.i)]);
-  const scenes = spec.scenes.filter((s, i) => keepIdx.has(i));
-  // Renumber badges 1..N in kept order.
+  const scenes = [
+    { say: String(wspec.hookSay), kw: '', emoji: String(wspec.hookEmoji || '✨'), visual: '', badge: '' },
+    ...keptFacts.map((f, k) => ({ say: f.say, kw: f.kw, emoji: f.emoji, visual: f.visual, badge: String(k + 1), claim: f.claim, url: f.url })),
+    { say: String(wspec.endingSay), kw: '', emoji: String(wspec.endingEmoji || '📩'), visual: '', badge: '' },
+  ];
   let b = 1;
   const PERSON_RX = /\b(person|people|man|woman|men|women|girl|boy|child|kid|teen|human|humanity|mankind|face|facial|female|male|portrait|silhouette|astronaut|scientist|crowd|viewer|lady|guy|character|figure|climber|traveler|traveller|explorer|adventurer|hiker|worker|doctor|teacher|student|dancer|singer|player|athlete|baby|babies|adult|embryo|fetus|doll|statue|mask|selfie|expression|expressive|smile|smiling|hand|hands|arm|arms|finger|fingers|leg|legs|limb|limbs|body|bodies|eye|eyes|skin|head|hair|mouth|lips|ear|ears|nose|skull|skeleton|bone|bones|foot|feet|toe|toes|knee|knees|elbow|elbows|shoulder|shoulders|palm|palms|fist|fists|thumb|thumbs|chest|neck|tongue|teeth|tooth)\b/i;
   job.scenes = scenes.map((s, si) => ({
     act: s.badge ? 'fact' : 'frame', prompt: (!s.badge && si === scenes.length - 1)
       ? 'radiant golden sunrise over a dreamy abstract landscape of glowing stars and soft light rays, uplifting celebratory mood'
       : (v => { const clean = String(v || '').split(/(?<=[.!?])\s+/).filter(x => x && !PERSON_RX.test(x)).join(' ').trim(); return (clean || 'dramatic cosmic vista of stars and nebula, topic concept art').slice(0, 380); })(s.visual), say: String(s.say || '').slice(0, 300),
-    kw: String(s.kw || '').replace(/V(?=[\u0900-\u097F])/g, '\u0935').replace(/\\n/g, '\n').slice(0, 60), state: 'wait', tries: 0, t0: 0, t1: 0,
+    kw: String(s.kw || '').replace(/V(?=[ऀ-ॿ])/g, 'व').replace(/\\n/g, '\n').slice(0, 60), state: 'wait', tries: 0, t0: 0, t1: 0,
     badge: s.badge ? String(b++) : '',
   }));
-  const stripTxt = String(spec.strip || job.topic).replace(/(के\s+|की\s+)(\d+|एक|दो|तीन|चार|पाँच|पांच|छह)(\s+)/, `$1${keptFacts.length}$3`).slice(0, 60);
+  const stripTxt = String(wspec.strip || job.topic).replace(/(के\s+|की\s+)(\d+|एक|दो|तीन|चार|पाँच|पांच|छह)(\s+)/, `$1${keptFacts.length}$3`).slice(0, 60);
   // Hook say must match the kept count too ("पांच तथ्य" spoken while 4 shown = viewer-noticeable mismatch).
   const NUMW = ['एक','दो','तीन','चार','पाँच','छह','सात','आठ','नौ','दस','ग्यारह','बारह'];
   const hookSay = job.scenes[0] && !job.scenes[0].badge ? job.scenes[0] : null;
-  if (hookSay) hookSay.say = hookSay.say.replace(/(पाँच|पांच|छह|सात|आठ|नौ|दस|ग्यारह|बारह|\d+)(?=\s+(?:[\u0900-\u097F]+\s+){0,2}(?:तथ्य|सच|facts))/, NUMW[Math.min(keptFacts.length, 12) - 1]);
+  if (hookSay) hookSay.say = hookSay.say.replace(/(पाँच|पांच|छह|सात|आठ|नौ|दस|ग्यारह|बारह|\d+)(?=\s+(?:[ऀ-ॿ]+\s+){0,2}(?:तथ्य|सच|facts))/, NUMW[Math.min(keptFacts.length, 12) - 1]);
   // Hook must not carry unsourced quantitative claims: any digit in the hook must come from a verified claim, else swap in a safe teaser.
   if (hookSay) {
-    const claimText = keptFacts.map(x => String(x.s.claim || '')).join(' ');
+    const claimText = keptFacts.map(x => String(x.claim || '')).join(' ');
     const hookNums = String(hookSay.say).match(/\d+(?:[.,]\d+)*/g) || [];
     const badNum = hookNums.find(n => !claimText.includes(n.replace(/,/g, '')));
     const quantWord = /(प्रतिशत|गुना|किलोमीटर|मीटर|टन|किग्रा|सेकंड|मिनट|घंटे|दिन|साल|वर्ष|गुना|तेज|गहरा|बड़ा|छोटा)/.test(String(hookSay.say));
     if (badNum || (/\d/.test(String(hookSay.say)) && quantWord)) hookSay.say = `क्या आप जानते हैं? ${String(job.topic).slice(0, 40)} के ये ${NUMW[Math.min(keptFacts.length, 12) - 1]} तथ्य आपका दिमाग हिला देंगे!`;
   }
-  job.factsMeta = JSON.stringify({ strip: stripTxt, fiction: !!spec.fiction, emojis: scenes.map(s => String(s.emoji || '').slice(0, 8)), sources: keptFacts.map(x => String(x.s.url).slice(0, 200)) });
+  job.factsMeta = JSON.stringify({ strip: stripTxt, fiction: false, emojis: scenes.map(s => String(s.emoji || '').slice(0, 8)), sources: keptFacts.map(x => String(x.url).slice(0, 200)) });
   job.status = 'clips'; job.stage = 'Drawing scene 1'; await job.save();
 }
 
