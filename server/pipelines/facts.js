@@ -16,7 +16,7 @@ import { assertPublicUrl } from '../ssrf.js';
 
 const run = promisify(execFile);
 const FW = 1080, FH = 1920, FPS = 24;
-const IMG_STYLE = 'vivid dramatic digital illustration, rich saturated colors, high detail, vertical composition, cinematic lighting, no text, no letters, no watermark, no people, no humans, no faces, no characters';
+const IMG_STYLE = 'vivid dramatic digital illustration of abstract objects, places and natural phenomena only, symbolic concept art, rich saturated colors, high detail, vertical composition, cinematic lighting, no text, no letters, no watermark';
 
 const jsonOf = t => { const m = String(t || '').match(/\{[\s\S]*\}/); if (!m) return null; try { return JSON.parse(m[0]); } catch { return null; } };
 const assTime = t => { t = Math.max(0, t); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), sec = (t % 60).toFixed(2).padStart(5, '0'); return `${h}:${String(m).padStart(2, '0')}:${sec}`; };
@@ -34,6 +34,8 @@ Rules:
 - "emoji" = exactly one unicode emoji matching the scene.
 - "visual" = ONE English sentence describing a vivid illustration of THIS line (objects/places/phenomena only - never any person, human, face or character; no text in image).
 - For the 4 fact scenes: "claim" = the key checkable statement, "url" = a primary or authoritative source page (NASA, Britannica, Smithsonian, NIH/NCBI, NCERT, official museum or government sites). Prefer stable en.wikipedia.org article URLs you are highly confident exist (most reliable for verification), then deep stable primary article pages (e.g. britannica.com/place/Venus-planet, science.nasa.gov/venus/venus-facts), never homepages or search pages, and only URLs you are highly confident exist, "evidence" = the exact number as digits then | then 2-3 English keywords that must appear on that page (e.g. "243|Venus|rotation|day"). Facts must be real, current, non-political, non-religious. Comparisons must be TRUE TODAY, not from old data: for Jupiter's Great Red Spot say only "पृथ्वी से बड़ा" (it is about 1.3 Earths wide now), never 2 Earths. Same care for any shrinking/changing record.
+- NUMBERS MUST BE SOURCED: every number, percentage, ratio or multiplier in a claim MUST appear verbatim on that claim's source page, about that exact subject. NEVER use popular listicle statistics (e.g. "first impression in 5 seconds", "50,000 thoughts a day", "X% more creative", "stress triples cortisol") unless the source page states that exact figure.
+- HOOK HAS NO NUMBERS: the hook must tease with a question ONLY ("Kya aap jaante hain...?") and must NEVER state a precise number, percentage, speed, size or quantitative claim - numbers belong in the verified facts, not the hook.
 - FIDELITY: "say" must keep the exact numeric relationship AND its base from the fact. If the fact is "the Sun holds 99.86% of the solar system's total mass", say "सौर मंडल के कुल द्रव्यमान का 99.86%" - never flip it into "बाकी सभी ग्रहों से 99.86% अधिक". A percentage without its true base is a FAIL.
 - NEVER invent causes, mechanisms or explanations not in the claim: for "अंतरिक्ष में ध्वनि नहीं होती" do NOT add wave-conversion or particle theories. State the fact, then only widely-known true context.`;
 
@@ -148,7 +150,7 @@ async function semanticVerify(kept) {
   for (let attempt = 0; attempt < 2; attempt++) {
   try {
     const m = await chatCompletion({ tools: [], messages: [
-      { role: 'system', content: 'You are a strict fact checker for a Hindi facts video. For each item decide whether the SOURCE explicitly supports the CLAIM: the exact number with the exact unit AND the exact subject must match (58 minutes vs 243 days is a FAIL; a number that appears about a different planet is a FAIL; unit mismatches like hours vs days are a FAIL). ALSO fail the item when the SAY (spoken Hindi) states a DIFFERENT fact than the CLAIM: a changed number, a flipped comparison (e.g. 99.86 percent of total mass spoken as 99.86 percent MORE than the other planets), a missing or wrong percentage base, or a NEW specific scientific cause/mechanism the source does not support (e.g. claiming gas density vibrations turn into electromagnetic waves). Generic awe phrases and widely-known context ("ye hairan kar deta hai", "dimag hila dene wala", "isliye raat ko tare chamakte dikhte hain") are FINE - fail only factual distortions, never style. Return ONLY {"verdicts":[{"i":1,"ok":true}]}; include every item.' },
+      { role: 'system', content: 'You are a strict fact checker for a Hindi facts video. For each item decide whether the SOURCE explicitly supports the CLAIM: the exact number with the exact unit AND the exact subject must match (58 minutes vs 243 days is a FAIL; a number that appears about a different planet is a FAIL; unit mismatches like hours vs days are a FAIL). ALSO fail the item when the SAY (spoken Hindi) states a DIFFERENT fact than the CLAIM: a changed number, a flipped comparison (e.g. 99.86 percent of total mass spoken as 99.86 percent MORE than the other planets), a missing or wrong percentage base, or a NEW specific scientific cause/mechanism the source does not support (e.g. claiming gas density vibrations turn into electromagnetic waves). Generic awe phrases and widely-known context ("ye hairan kar deta hai", "dimag hila dene wala", "isliye raat ko tare chamakte dikhte hain") are FINE - fail only factual distortions, never style. ALSO: when the CLAIM carries a percentage, ratio, multiplier, speed, size or any precise quantity, the SOURCE must state that EXACT quantity about that EXACT subject - a related but different figure (e.g. "more than doubled" when the claim says 20%) is a FAIL. Return ONLY {"verdicts":[{"i":1,"ok":true}]}; include every item.' },
       { role: 'user', content: JSON.stringify(items) }] });
     const j = jsonOf(m.content);
     const verdicts = (j && Array.isArray(j.verdicts)) ? j.verdicts : [];
@@ -231,9 +233,11 @@ CURRENT SAY (distorted): ${keptFacts[k].s.say}`).join('\n---\n');
   const scenes = spec.scenes.filter((s, i) => keepIdx.has(i));
   // Renumber badges 1..N in kept order.
   let b = 1;
-  const PERSON_RX = /\b(person|people|man|woman|men|women|girl|boy|child|kid|teen|human|face|portrait|silhouette|astronaut|scientist|crowd|viewer|lady|guy|character|figure|hand|hands|arm|arms|finger|fingers|leg|legs|limb|limbs|body|bodies|eye|eyes|skin)\b/i;
-  job.scenes = scenes.map(s => ({
-    act: s.badge ? 'fact' : 'frame', prompt: (v => { const clean = String(v || '').split(/(?<=[.!?])\s+/).filter(x => x && !PERSON_RX.test(x)).join(' ').trim(); return (clean || 'dramatic cosmic vista of stars and nebula, topic concept art').slice(0, 380); })(s.visual), say: String(s.say || '').slice(0, 300),
+  const PERSON_RX = /\b(person|people|man|woman|men|women|girl|boy|child|kid|teen|human|humanity|mankind|face|facial|female|male|portrait|silhouette|astronaut|scientist|crowd|viewer|lady|guy|character|figure|climber|traveler|traveller|explorer|adventurer|hiker|worker|doctor|teacher|student|dancer|singer|player|athlete|baby|babies|adult|embryo|fetus|doll|statue|mask|selfie|expression|expressive|smile|smiling|hand|hands|arm|arms|finger|fingers|leg|legs|limb|limbs|body|bodies|eye|eyes|skin|head|hair|mouth|lips|ear|ears|nose|skull|skeleton|bone|bones|foot|feet|toe|toes|knee|knees|elbow|elbows|shoulder|shoulders|palm|palms|fist|fists|thumb|thumbs|chest|neck|tongue|teeth|tooth)\b/i;
+  job.scenes = scenes.map((s, si) => ({
+    act: s.badge ? 'fact' : 'frame', prompt: (!s.badge && si === scenes.length - 1)
+      ? 'radiant golden sunrise over a dreamy abstract landscape of glowing stars and soft light rays, uplifting celebratory mood'
+      : (v => { const clean = String(v || '').split(/(?<=[.!?])\s+/).filter(x => x && !PERSON_RX.test(x)).join(' ').trim(); return (clean || 'dramatic cosmic vista of stars and nebula, topic concept art').slice(0, 380); })(s.visual), say: String(s.say || '').slice(0, 300),
     kw: String(s.kw || '').replace(/V(?=[\u0900-\u097F])/g, '\u0935').replace(/\\n/g, '\n').slice(0, 60), state: 'wait', tries: 0, t0: 0, t1: 0,
     badge: s.badge ? String(b++) : '',
   }));
@@ -242,6 +246,14 @@ CURRENT SAY (distorted): ${keptFacts[k].s.say}`).join('\n---\n');
   const NUMW = ['एक','दो','तीन','चार','पाँच','छह','सात','आठ','नौ','दस','ग्यारह','बारह'];
   const hookSay = job.scenes[0] && !job.scenes[0].badge ? job.scenes[0] : null;
   if (hookSay) hookSay.say = hookSay.say.replace(/(पाँच|पांच|छह|सात|आठ|नौ|दस|ग्यारह|बारह|\d+)(?=\s+(?:[\u0900-\u097F]+\s+){0,2}(?:तथ्य|सच|facts))/, NUMW[Math.min(keptFacts.length, 12) - 1]);
+  // Hook must not carry unsourced quantitative claims: any digit in the hook must come from a verified claim, else swap in a safe teaser.
+  if (hookSay) {
+    const claimText = keptFacts.map(x => String(x.s.claim || '')).join(' ');
+    const hookNums = String(hookSay.say).match(/\d+(?:[.,]\d+)*/g) || [];
+    const badNum = hookNums.find(n => !claimText.includes(n.replace(/,/g, '')));
+    const quantWord = /(प्रतिशत|गुना|किलोमीटर|मीटर|टन|किग्रा|सेकंड|मिनट|घंटे|दिन|साल|वर्ष|गुना|तेज|गहरा|बड़ा|छोटा)/.test(String(hookSay.say));
+    if (badNum || (/\d/.test(String(hookSay.say)) && quantWord)) hookSay.say = `क्या आप जानते हैं? ${String(job.topic).slice(0, 40)} के ये ${NUMW[Math.min(keptFacts.length, 12) - 1]} तथ्य आपका दिमाग हिला देंगे!`;
+  }
   job.factsMeta = JSON.stringify({ strip: stripTxt, fiction: !!spec.fiction, emojis: scenes.map(s => String(s.emoji || '').slice(0, 8)), sources: keptFacts.map(x => String(x.s.url).slice(0, 200)) });
   job.status = 'clips'; job.stage = 'Drawing scene 1'; await job.save();
 }
